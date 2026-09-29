@@ -1,0 +1,15 @@
+[Unit]
+Description=Gemini WhisperFlow Daemon (Instant Linux Speech-to-Text)
+After=graphical-session.target
+
+[Service]
+Type=simple
+Environment="DISPLAY=:0"
+Environment="PYTHONUNBUFFERED=1"
+Environment="XAUTHORITY=%h/.Xauthority"
+ExecStart=%h/.local/share/gemini-voice-flow/venv/bin/python %h/gemini-whisperflow/gemini_flow.py
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target

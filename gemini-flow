@@ -1,0 +1,38 @@
+#!/bin/bash
+# Gemini WhisperFlow CLI Manager
+
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VENV="$HOME/.local/share/gemini-voice-flow/venv/bin/python"
+SCRIPT="$DIR/gemini_flow.py"
+
+if [ ! -f "$VENV" ]; then
+  VENV="python3"
+fi
+
+case "$1" in
+  start)
+    systemctl --user daemon-reload
+    systemctl --user start gemini-voice-flow
+    echo "✅ Gemini WhisperFlow started!"
+    ;;
+  stop)
+    systemctl --user stop gemini-voice-flow
+    echo "🛑 Gemini WhisperFlow stopped."
+    ;;
+  restart)
+    systemctl --user restart gemini-voice-flow
+    echo "🔄 Gemini WhisperFlow restarted."
+    ;;
+  status)
+    systemctl --user status gemini-voice-flow --no-pager
+    ;;
+  logs|log)
+    journalctl --user -u gemini-voice-flow -f
+    ;;
+  run)
+    exec "$VENV" "$SCRIPT"
+    ;;
+  *)
+    echo "Usage: gemini-flow {start|stop|restart|status|logs|run}"
+    ;;
+esac

@@ -1,0 +1,7 @@
+{
+  "gemini_api_key": "YOUR_GEMINI_API_KEY_HERE",
+  "model": "gemini-3.5-flash-lite",
+  "trigger_key": "caps_lock",
+  "sound_feedback": false,
+  "notify": true
+}
