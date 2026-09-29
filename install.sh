@@ -38,13 +38,38 @@ fi
 
 # 4. Install CLI command and systemd user service
 echo "Setting up CLI command and systemd service..."
-mkdir -p "$HOME/.local/bin" "$HOME/.config/systemd/user"
+mkdir -p "$HOME/.local/bin" "$HOME/.config/systemd/user" "$HOME/.config/autostart" "$HOME/.local/share/applications"
 cp gemini-flow "$HOME/.local/bin/gemini-flow"
 chmod +x "$HOME/.local/bin/gemini-flow"
 
 sed "s|%h|$HOME|g" gemini-whisperflow.service > "$HOME/.config/systemd/user/gemini-voice-flow.service"
 systemctl --user daemon-reload
 systemctl --user enable gemini-voice-flow.service || true
+
+# 5. XDG Desktop Autostart on system boot / login
+cat << 'EOF_DESKTOP' > "$HOME/.config/autostart/gemini-whisperflow.desktop"
+[Desktop Entry]
+Type=Application
+Name=Gemini WhisperFlow
+Comment=Voice dictation daemon for Linux
+Exec=systemctl --user start gemini-voice-flow.service
+Terminal=false
+Categories=Utility;Accessibility;
+X-GNOME-Autostart-enabled=true
+StartupNotify=false
+EOF_DESKTOP
+
+cat << 'EOF_APP' > "$HOME/.local/share/applications/gemini-whisperflow.desktop"
+[Desktop Entry]
+Type=Application
+Name=Gemini WhisperFlow
+Comment=Voice dictation daemon for Linux
+Exec=bash -c "systemctl --user restart gemini-voice-flow && notify-send 'WhisperFlow' 'Daemon started and running in background'"
+Icon=audio-input-microphone
+Terminal=false
+Categories=Utility;Accessibility;
+StartupNotify=false
+EOF_APP
 
 echo ""
 echo "Installation complete."

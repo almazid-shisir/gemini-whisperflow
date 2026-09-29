@@ -204,20 +204,21 @@ class VoiceFlowDaemon:
             session_id = uuid.uuid4().hex[:8]
             self.current_wav = os.path.join(tempfile.gettempdir(), f"gwf_{os.getpid()}_{session_id}.wav")
 
+            # Spawn audio recording immediately for 0ms start latency
+            self.record_proc = subprocess.Popen([
+                "arecord",
+                "-f", "cd",
+                "-t", "wav",
+                "-r", "16000",
+                "-c", "1",
+                "-q",
+                self.current_wav
+            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
         trigger_name = self.cfg.get("trigger_key", "caps_lock").replace("_", " ").title()
         print(f"[whisperflow] Recording started ({trigger_name} to finish)...")
         self.play_sound("bell")
         self.show_notification("Recording...", f"Speak now. Press {trigger_name} when finished.")
-
-        self.record_proc = subprocess.Popen([
-            "arecord",
-            "-f", "cd",
-            "-t", "wav",
-            "-r", "16000",
-            "-c", "1",
-            "-q",
-            self.current_wav
-        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     def stop_and_transcribe(self):
         with self.lock:
