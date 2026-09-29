@@ -1,41 +1,33 @@
-# 🎙️ Gemini WhisperFlow for Linux
+# Gemini WhisperFlow for Linux
 
-> **Ultra-fast, native Linux voice dictation daemon powered by Google Gemini Speech & Audio AI.**
-> A lightweight, open-source alternative to Wispr Flow and Superwhisper. Works system-wide across all applications with a simple single-click toggle shortcut and intelligent transcript cleanup engine.
+Native Linux voice dictation daemon that transcribes spoken audio and types the resulting text directly into the active cursor position.
 
----
+Designed as a lightweight, low-latency alternative to tools like Wispr Flow or Superwhisper on Linux desktop environments (X11).
 
-## ✨ Features
+## Features
 
-- ⚡ **Ultra-Fast Transcription:** Powered by Google's `gemini-3.5-flash-lite` model with ~1.2s - 1.8s response time.
-- 🧹 **Intelligent WisprFlow Cleanup:**
-  - **Filler Word Removal:** Automatically strips fillers in English (`um`, `uh`, `like`, `you know`) and Bengali (`মানে`, `আসলে`, `ওই আর কি`, `এই ধরেন`).
-  - **Self-Corrections:** Intelligently corrects on the fly (*e.g.* `"কালকে না... পরশু যাবো"` $\rightarrow$ `"পরশু যাবো"` / `"Thursday wait no Friday"` $\rightarrow$ `"Friday"`).
-  - **Spoken Punctuation:** Converts spoken punctuation commands (`"comma"`, `"period"`, `"দাঁড়ি"`, `"কমা"`, `"নতুন লাইন"`) into actual symbols (`.`, `,`, `।`, `?`, line breaks).
-  - **Dictation Protection:** Questions and commands spoken are strictly transcribed as document text, never answered or executed by AI.
-- 🎯 **Click-to-Start / Click-to-Stop:** Just click `CapsLock` once to start speaking, and click `CapsLock` again to finish and paste! (No need to hold keys down).
-- ✍️ **Direct Cursor Typing:** Automatically injects and pastes transcribed text directly into wherever your active cursor is (Browser, VS Code, Slack, Terminal, etc.).
-- 🌐 **Multilingual & Mixed Speech:** Flawlessly transcribes **Bengali**, **English**, and mixed **Banglish** with high contextual accuracy.
-- 🔇 **100% Silent Mode:** No distracting beeps or bells. Clean desktop notifications inform you when recording starts and when transcription is complete.
-- 🛡️ **No Stuck CapsLock:** Automatically ensures the CapsLock uppercase toggle state stays off so your normal typing is never affected.
-- 🐧 **Linux Native & Lightweight:** Pure Python daemon using standard Linux utilities (`arecord`, `xdotool`, `xclip`) with minimal RAM usage (<30MB).
+- **Low-latency transcription**: Streams compressed audio to Google Gemini API with typical response times of 1.2s - 2.5s even on long dictations.
+- **Transcript cleanup**: Filters spoken filler words (`um`, `uh`, `মানে`, `আসলে`), handles verbal self-corrections (*e.g.*, "Thursday, wait no, Friday" -> "Friday"), and converts spoken punctuation commands (*e.g.*, "comma", "period", "দাঁড়ি", "new line") to proper typographical symbols.
+- **Dictation isolation**: Spoken questions, prompts, or commands are transcribed verbatim into your document or editor rather than being executed by the model.
+- **Push-to-toggle trigger**: A single tap on `CapsLock` (or a configured hotkey) starts recording, and a second tap stops and pastes the output. No need to hold keys down.
+- **Automatic paste**: Inserts text directly at the active cursor position using `xclip` and `xdotool`.
+- **Multilingual support**: Transcribes Bengali, English, and mixed Banglish without requiring manual language switching.
+- **Caps Lock safety**: Automatically restores Caps Lock state so normal typing remains unaffected.
+- **Resource efficient**: Written in Python with standard Linux system utilities (`arecord`, `ffmpeg`, `xdotool`, `xclip`), consuming under 35 MB resident memory.
 
----
+## Prerequisites
 
-## 📋 System Requirements
-
-- **OS:** Linux (X11 environment: Ubuntu, Debian, Mint, Arch, Fedora, etc.)
-- **Dependencies:**
-  - `python3` & `python3-venv`
+- **OS**: Linux with X11 display server (Ubuntu, Debian, Fedora, Arch, Mint, etc.)
+- **System packages**:
+  - `python3` (with `python3-venv`)
   - `alsa-utils` (`arecord` for microphone capture)
-  - `xdotool` & `xclip` (for automated clipboard pasting)
-  - `libnotify-bin` (`notify-send` for desktop notifications)
+  - `ffmpeg` (for fast audio compression)
+  - `xdotool` and `xclip` (for clipboard interaction and keystroke simulation)
+  - `libnotify-bin` (`notify-send` for desktop status hints)
 
----
+## Installation
 
-## 🚀 Quick Installation (1-Click)
-
-Clone this repository and run the installer:
+Clone the repository and run the setup script:
 
 ```bash
 git clone https://github.com/almazid-shisir/gemini-whisperflow.git
@@ -44,20 +36,16 @@ chmod +x install.sh
 ./install.sh
 ```
 
----
+Ensure `~/.local/bin` is in your `$PATH`.
 
-## ⚙️ Configuration
+## Configuration
 
-Open your configuration file:
-
-```bash
-nano ~/.config/gemini-voice-flow/config.json
-```
+Edit `~/.config/gemini-voice-flow/config.json`:
 
 ```json
 {
   "gemini_api_key": "YOUR_GEMINI_API_KEY_HERE",
-  "model": "gemini-3.5-flash-lite",
+  "model": "gemini-flash-lite-latest",
   "trigger_key": "caps_lock",
   "clean_transcript": true,
   "sound_feedback": false,
@@ -65,51 +53,63 @@ nano ~/.config/gemini-voice-flow/config.json
 }
 ```
 
-### Options:
-| Key | Default | Description |
-|---|---|---|
-| `gemini_api_key` | Required | Your Google Gemini API Key from Google AI Studio. |
-| `model` | `gemini-3.5-flash-lite` | Model to use. `gemini-3.5-flash-lite` is recommended for sub-2s latency. |
-| `trigger_key` | `caps_lock` | Toggle key (`caps_lock`, `f8`, `pause`, `scroll_lock`, etc.). |
-| `clean_transcript` | `true` | `true` for WisprFlow-style intelligent cleanup; `false` for raw verbatim output. |
-| `sound_feedback` | `false` | Set `true` to play audio chimes on start and complete. |
-| `notify` | `true` | Show native desktop notification alerts. |
+### Configuration Options
 
-### Custom Prompt Rules (Optional)
-If you want to add your own custom dictation rules, vocabulary, or formatting instructions, simply create:
-```bash
-nano ~/.config/gemini-voice-flow/prompt.txt
-```
-Any text placed in this file will automatically override the default system prompt.
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `gemini_api_key` | string | `""` | Gemini API key from Google AI Studio. |
+| `model` | string | `"gemini-flash-lite-latest"` | Target Gemini model. `gemini-flash-lite-latest` provides optimal latency. |
+| `trigger_key` | string | `"caps_lock"` | Hotkey trigger. Options include `caps_lock`, `f8`, `scroll_lock`, `pause`. |
+| `clean_transcript` | boolean | `true` | When true, applies transcript cleanup and punctuation conversion. Set to false for verbatim output. |
+| `sound_feedback` | boolean | `false` | Play audio cues on recording start and completion. |
+| `notify` | boolean | `true` | Display desktop notifications via `notify-send`. |
 
----
+### Custom Prompt Rules
 
-## 🎮 CLI Management
-
-Use the `gemini-flow` CLI to control the daemon:
+To define custom vocabulary, formatting preferences, or project-specific jargon, create a text file at:
 
 ```bash
-gemini-flow status     # Check if the service is running and view recent logs
-gemini-flow restart    # Restart service after changing config
-gemini-flow stop       # Temporarily stop the service
-gemini-flow start      # Start the background daemon
-gemini-flow logs       # View real-time live logs
+~/.config/gemini-voice-flow/prompt.txt
 ```
 
----
+If this file exists, its contents will be used as the system instruction for the dictation engine.
 
-## 🛠️ How It Works (Single-Pass Multimodal vs. WisprFlow)
+## Usage
 
-Traditional dictation tools (like WisprFlow or Superwhisper) rely on a **two-step pipeline**:
-1. Speech $\rightarrow$ Whisper API (Produces raw text full of fillers)
-2. Raw text $\rightarrow$ LLM pass (Cleans the text)
+Control the background daemon using `gemini-flow`:
 
-This two-step process takes **3.0 to 5.0+ seconds**.
+```bash
+gemini-flow start      # Start systemd user service
+gemini-flow stop       # Stop the service
+gemini-flow restart    # Restart after editing configuration
+gemini-flow status     # Check process status and memory
+gemini-flow logs       # Follow live daemon logs
+gemini-flow run        # Run daemon in the foreground for debugging
+```
 
-**Gemini WhisperFlow** uses Gemini's **Single-Pass Multimodal Audio architecture**:
-Raw 16kHz audio and the system prompt are fed directly to Gemini simultaneously. Gemini listens directly to the audio, understands inflection and self-corrections, and outputs the cleaned transcript in **under 1.8 seconds**.
+### Basic Workflow
 
----
+1. Place your text cursor in any application (editor, browser, terminal, Slack).
+2. Tap `CapsLock` once to begin speaking.
+3. Speak normally.
+4. Tap `CapsLock` again when finished. The transcribed text will be pasted at your cursor.
 
-## 📄 License
-MIT License. Open source and free for personal and commercial use.
+## Architecture
+
+Traditional voice dictation software typically uses a two-stage pipeline:
+1. Speech-to-text model produces raw output containing fillers, repetitions, and spoken commands.
+2. A separate LLM call cleans the output.
+
+This two-stage approach introduces 3-5 seconds of latency.
+
+Gemini WhisperFlow leverages Gemini's multimodal audio capabilities:
+1. Raw audio is captured via `arecord` at 16kHz mono.
+2. The audio is compressed to a 48kbps MP3 stream using `ffmpeg` (reducing payload size by ~85%).
+3. The compressed audio and cleanup instructions are sent directly to the model in a single request.
+4. The cleaned text is written to the X11 clipboard and pasted via simulated keystroke.
+
+This single-pass design delivers clean text within 1.2s to 2.5s, even on 30-40 second recordings.
+
+## License
+
+MIT License.

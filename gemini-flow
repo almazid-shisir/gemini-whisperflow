@@ -13,15 +13,15 @@ case "$1" in
   start)
     systemctl --user daemon-reload
     systemctl --user start gemini-voice-flow
-    echo "✅ Gemini WhisperFlow started!"
+    echo "Gemini WhisperFlow started."
     ;;
   stop)
     systemctl --user stop gemini-voice-flow
-    echo "🛑 Gemini WhisperFlow stopped."
+    echo "Gemini WhisperFlow stopped."
     ;;
   restart)
     systemctl --user restart gemini-voice-flow
-    echo "🔄 Gemini WhisperFlow restarted."
+    echo "Gemini WhisperFlow restarted."
     ;;
   status)
     systemctl --user status gemini-voice-flow --no-pager
