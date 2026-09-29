@@ -105,7 +105,7 @@ def compress_audio(wav_path):
         mp3_path
     ]
     try:
-        res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5.0)
+        res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         if res.returncode == 0 and os.path.exists(mp3_path) and os.path.getsize(mp3_path) > 500:
             return mp3_path, "audio/mp3"
     except Exception:
@@ -253,7 +253,7 @@ class VoiceFlowDaemon:
                 "generationConfig": {"temperature": 0.0}
             }
 
-            resp = requests.post(url, json=payload, timeout=30)
+            resp = requests.post(url, json=payload, timeout=None)
             if resp.status_code != 200:
                 print(f"[whisperflow] API error {resp.status_code}: {resp.text[:200]}")
                 self.show_notification("API Error", f"HTTP {resp.status_code}")
