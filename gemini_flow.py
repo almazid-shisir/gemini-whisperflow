@@ -24,7 +24,7 @@ CUSTOM_PROMPT_PATH = os.path.join(CONFIG_DIR, "prompt.txt")
 
 DEFAULT_CONFIG = {
     "gemini_api_key": "YOUR_GEMINI_API_KEY_HERE",
-    "model": "gemini-flash-lite-latest",
+    "model": "gemini-3.5-flash-lite",
     "trigger_key": "caps_lock",
     "clean_transcript": True,
     "sound_feedback": False,
@@ -113,6 +113,15 @@ def compress_audio(wav_path):
 
     return wav_path, "audio/wav"
 
+def resolve_target_key(key_str):
+    name = key_str.lower().strip().replace("-", "_").replace(" ", "_")
+    if hasattr(keyboard.Key, name):
+        return getattr(keyboard.Key, name)
+    try:
+        return keyboard.KeyCode.from_char(name)
+    except Exception:
+        return keyboard.Key.caps_lock
+
 config = load_config()
 
 class VoiceFlowDaemon:
@@ -122,18 +131,27 @@ class VoiceFlowDaemon:
         self.record_proc = None
         self.current_wav = None
         self.last_toggle_time = 0
+        self.suppress_hotkey = False
         self.lock = threading.Lock()
-        self.hotkeys = None
+        self.target_key = resolve_target_key(cfg.get("trigger_key", "caps_lock"))
 
     def ensure_caps_off(self):
+        """Turn off Caps Lock if left on, with hotkey suppression to prevent self-triggering"""
+        if self.cfg.get("trigger_key", "").lower() != "caps_lock":
+            return
         try:
             env = os.environ.copy()
             env["DISPLAY"] = env.get("DISPLAY", ":0")
             res = subprocess.run(["xset", "q"], env=env, capture_output=True, text=True, timeout=1.0)
             if "Caps Lock:   on" in res.stdout:
-                subprocess.run(["xdotool", "key", "Caps_Lock"], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                self.suppress_hotkey = True
+                try:
+                    subprocess.run(["xdotool", "key", "Caps_Lock"], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    time.sleep(0.12)
+                finally:
+                    self.suppress_hotkey = False
         except Exception:
-            pass
+            self.suppress_hotkey = False
 
     def play_sound(self, sound_name):
         if not self.cfg.get("sound_feedback", False):
@@ -156,14 +174,21 @@ class VoiceFlowDaemon:
             message
         ], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
+    def on_key_press(self, key):
+        if self.suppress_hotkey:
+            return
+        if key == self.target_key:
+            self.toggle()
+
     def toggle(self):
+        if self.suppress_hotkey:
+            return
+
         now = time.time()
+        # Debounce rapid accidental double clicks within 0.35s
         if now - self.last_toggle_time < 0.35:
             return
         self.last_toggle_time = now
-
-        if self.cfg.get("trigger_key") == "caps_lock":
-            threading.Thread(target=self.ensure_caps_off, daemon=True).start()
 
         if not self.is_recording:
             self.start_recording()
@@ -179,10 +204,10 @@ class VoiceFlowDaemon:
             session_id = uuid.uuid4().hex[:8]
             self.current_wav = os.path.join(tempfile.gettempdir(), f"gwf_{os.getpid()}_{session_id}.wav")
 
-        trigger = self.cfg.get("trigger_key", "caps_lock").replace("_", " ").title()
-        print(f"[whisperflow] Recording started ({trigger} to finish)...")
+        trigger_name = self.cfg.get("trigger_key", "caps_lock").replace("_", " ").title()
+        print(f"[whisperflow] Recording started ({trigger_name} to finish)...")
         self.play_sound("bell")
-        self.show_notification("Recording...", f"Speak now. Press {trigger} when finished.")
+        self.show_notification("Recording...", f"Speak now. Press {trigger_name} when finished.")
 
         self.record_proc = subprocess.Popen([
             "arecord",
@@ -227,8 +252,9 @@ class VoiceFlowDaemon:
 
         audio_file = wav_path
         try:
-            # Compress audio to MP3 if ffmpeg is present for 8x smaller payload
+            t_c0 = time.time()
             audio_file, mime_type = compress_audio(wav_path)
+            t_compress = time.time() - t_c0
 
             with open(audio_file, "rb") as f:
                 audio_b64 = base64.b64encode(f.read()).decode("utf-8")
@@ -239,7 +265,7 @@ class VoiceFlowDaemon:
                 self.show_notification("Configuration Error", "Please add gemini_api_key to config.json")
                 return
 
-            model = self.cfg.get("model", "gemini-flash-lite-latest")
+            model = self.cfg.get("model", "gemini-3.5-flash-lite")
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
             prompt = get_system_prompt(self.cfg)
 
@@ -253,7 +279,10 @@ class VoiceFlowDaemon:
                 "generationConfig": {"temperature": 0.0}
             }
 
+            t_api0 = time.time()
             resp = requests.post(url, json=payload, timeout=None)
+            t_api = time.time() - t_api0
+
             if resp.status_code != 200:
                 print(f"[whisperflow] API error {resp.status_code}: {resp.text[:200]}")
                 self.show_notification("API Error", f"HTTP {resp.status_code}")
@@ -274,7 +303,8 @@ class VoiceFlowDaemon:
                 print(f"[whisperflow] Empty transcription ({elapsed}s).")
                 return
 
-            print(f"[whisperflow] Transcribed in {elapsed}s: \"{text[:80]}\"")
+            file_kb = round(os.path.getsize(audio_file) / 1024, 1)
+            print(f"[whisperflow] Transcribed in {elapsed}s (api: {t_api:.2f}s, enc: {t_compress:.2f}s, {file_kb}KB): \"{text[:80]}\"")
             self.play_sound("complete")
             self._paste_text(text)
             self.show_notification("Done", text[:60] + ("..." if len(text) > 60 else ""))
@@ -284,8 +314,7 @@ class VoiceFlowDaemon:
             self.show_notification("Error", str(e))
         finally:
             self._cleanup_files(wav_path, audio_file)
-            if self.cfg.get("trigger_key") == "caps_lock":
-                self.ensure_caps_off()
+            self.ensure_caps_off()
 
     def _cleanup_files(self, *paths):
         for p in paths:
@@ -311,22 +340,16 @@ class VoiceFlowDaemon:
 def main():
     daemon = VoiceFlowDaemon(config)
     trigger = config.get("trigger_key", "caps_lock").lower()
-    hotkey_str = f"<{trigger}>"
 
     print("Gemini WhisperFlow Daemon (Linux STT)")
     print(f"Trigger: [{trigger.replace('_', ' ').title()}]")
-    print(f"Model  : {config.get('model', 'gemini-flash-lite-latest')}")
+    print(f"Model  : {config.get('model', 'gemini-3.5-flash-lite')}")
     print(f"Mode   : {'Clean Dictation' if config.get('clean_transcript', True) else 'Verbatim'}")
     print(f"Config : {CONFIG_PATH}\n")
 
-    hotkey_map = {
-        hotkey_str: daemon.toggle
-    }
-
-    with keyboard.GlobalHotKeys(hotkey_map) as hotkeys:
-        daemon.hotkeys = hotkeys
+    with keyboard.Listener(on_press=daemon.on_key_press) as listener:
         try:
-            hotkeys.join()
+            listener.join()
         except KeyboardInterrupt:
             print("\nDaemon stopped.")
 
