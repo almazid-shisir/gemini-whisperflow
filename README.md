@@ -53,12 +53,12 @@ chmod +x install.sh
 ### What the installer does:
 1. Detects your package manager and installs all dependencies (`pipewire`, `alsa-utils`, `xclip`, `xdotool`, `ffmpeg`, `libnotify-bin`, `wl-clipboard`).
 2. Creates an isolated Python virtual environment at `~/.local/share/gemini-voice-flow/venv`.
-3. Launches the **Interactive Setup Wizard**:
+3. Copies application runtime and CLI to standard paths (`~/.local/share/gemini-voice-flow` and `~/.local/bin/gemini-flow`).
+4. Launches the **Interactive Setup Wizard**:
    - Prompts for your Google Gemini API Key.
    - Instantly tests and validates the key against Google API servers.
-   - Lets you choose your preferred trigger key (`ctrl_r` recommended).
-4. Registers and starts the systemd background user service (`gemini-voice-flow.service`).
-5. Adds the `gemini-flow` CLI command to your system path.
+   - Lets you choose your preferred trigger key (`smart` recommended — accepts Right Alt or Right Shift).
+5. Registers and starts the systemd background user service (`gemini-voice-flow.service`).
 
 ---
 
@@ -78,17 +78,17 @@ You need a Google Gemini API Key (generous free tier available):
 Place your text cursor in **any application** (VS Code, Chrome, Telegram, Terminal, Obsidian, Discord):
 
 ### Option 1: Push-to-Talk (Quick Thoughts)
-1. **Hold down `Right Control` (`ctrl_r`)**.
+1. **Hold down `Right Alt` (AltGr) or `Right Shift`**.
 2. Speak your thought.
-3. **Release `Right Control`**.
-4. The transcribed and polished text is instantly pasted at your cursor!
+3. **Release the key**.
+4. The transcribed and formatted text is instantly pasted at your cursor in <1.5s!
 
 ### Option 2: Hands-Free Dictation (Long Form / Paragraphs)
-1. **Tap `Right Control` once quickly (<0.35s)**.
+1. **Tap `Right Alt` (or `Right Shift`) once quickly (<0.35s)**.
 2. A desktop notification and terminal log will confirm: `🎙️ Hands-Free Mode Active`.
 3. Speak as long as you want (5, 10, 15+ minutes) without holding any key down.
-4. When finished, **tap `Right Control` once again** (or press `Esc`).
-5. Your entire speech will be structured and pasted into your active window!
+4. When finished, **tap the key once again** (or press `Esc`).
+5. Your speech will be transcribed verbatim and pasted into your active window!
 
 ---
 
@@ -120,12 +120,12 @@ Configuration is stored at `~/.config/gemini-voice-flow/config.json`:
   "gemini_api_key": "YOUR_GEMINI_API_KEY",
   "transcribe_model": "gemini-3.5-transcribe",
   "cleanup_model": "gemini-3.5-flash-lite",
-  "trigger_key": "ctrl_r",
+  "trigger_key": "smart",
   "clean_transcript": true,
   "sound_feedback": false,
   "notify": true,
   "min_hold_seconds": 0.35,
-  "silence_threshold_db": -38.0
+  "silence_threshold_db": -45.0
 }
 ```
 
@@ -134,27 +134,25 @@ Configuration is stored at `~/.config/gemini-voice-flow/config.json`:
 | Setting | Type | Default | Description |
 |---|---|---|---|
 | `gemini_api_key` | string | `""` | Google Gemini API key from AI Studio. |
-| `transcribe_model` | string | `"gemini-3.5-transcribe"` | Stage 1 dedicated ASR transcription model. |
-| `cleanup_model` | string | `"gemini-3.5-flash-lite"` | Stage 2 text clarifier and fluff removal model. |
-| `trigger_key` | string | `"ctrl_r"` | Dictation trigger key (`ctrl_r`, `shift_r`, `alt_r`, `f9`, etc.). |
-| `clean_transcript` | boolean | `true` | When `true`, removes filler words (*"মানে"*, *"আসলে"*) and punctuates. Set `false` for raw verbatim mode. |
-| `min_hold_seconds` | float | `0.35` | Taps shorter than this toggle hands-free mode; holds longer than this behave as push-to-talk. |
-| `silence_threshold_db` | float | `-38.0` | Peak volume dB gate. Audio below this volume is rejected locally as background noise. |
+| `transcribe_model` | string | `"gemini-3.5-transcribe"` | ASR transcription backup model. |
+| `cleanup_model` | string | `"gemini-3.5-flash-lite"` | Primary single-pass ultra-fast dictation engine. |
+| `trigger_key` | string | `"smart"` | Dictation trigger (`smart` accepts Right Alt & Right Shift; or `alt_r`, `shift_r`, `ctrl_r`, `f9`). |
+| `clean_transcript` | boolean | `true` | When `true`, applies code-switching punctuation & tech normalization. |
+| `min_hold_seconds` | float | `0.35` | Taps shorter than this toggle hands-free mode; holds longer behave as push-to-talk. |
+| `silence_threshold_db` | float | `-45.0` | Peak volume dB gate. Rejects room silence locally to save API quota. |
 | `sound_feedback` | boolean | `false` | Play audio cues on record start and completion. |
-| `notify` | boolean | `true` | Display desktop notifications via `notify-send`. |
+| `notify` | boolean | `true` | Display instant desktop notifications via `notify-send`. |
 
 ---
 
-## 🧠 Customizing the NLP Editor Prompt
+## 🗑️ Uninstallation
 
-You can customize the Stage 2 text clarifier instructions to match your personal writing style!
-Create or edit `~/.config/gemini-voice-flow/prompt.txt`:
+To cleanly remove Gemini WhisperFlow and its services from your system:
 
 ```bash
-nano ~/.config/gemini-voice-flow/prompt.txt
+cd gemini-whisperflow
+./uninstall.sh
 ```
-
-If this file exists, Gemini WhisperFlow will use your custom prompt to format and polish your spoken text.
 
 ---
 
@@ -185,10 +183,11 @@ If you encounter any issues:
 ## 🇧🇩 বাংলা নির্দেশিকা (Quick Bengali Guide)
 
 * **ইনস্টলেশন:** টার্মিনালে `./install.sh` রান করুন। ইনস্টলার স্বয়ংক্রিয়ভাবে সব ডিপেন্ডেন্সি সেটআপ করবে এবং আপনার কাছে Gemini API কি চাইবে।
-* **API Key:** ইনপুট দেওয়ার সাথে সাথে সিস্টেম স্বয়ংক্রিয়ভাবে গুগল সার্ভারে কি ভেরিফাই করবে এবং `gemini-3.5-transcribe` ও `gemini-3.5-flash-lite` কনফিগার করে নিবে।
+* **API Key:** ইনপুট দেওয়ার সাথে সাথে সিস্টেম স্বয়ংক্রিয়ভাবে গুগল সার্ভারে কি ভেরিফাই করবে এবং মডেল দুটি অটো কনফিগার করে নিবে।
 * **ব্যবহার:**
-  * **Hold-to-Talk:** কিবোর্ডের `Right Control` (`ctrl_r`) চেপে ধরে কথা বলুন, ছেড়ে দিলে স্বয়ংক্রিয়ভাবে টেক্সট পেস্ট হয়ে যাবে।
-  * **Hands-Free Mode:** `Right Control` একবার হালকা ট্যাপ করুন। মাইক চালু থাকবে, হাত ছেড়ে দিয়ে রিল্যাক্স হয়ে যতখুশি কথা বলুন। কথা শেষ হলে আবার `Right Control` (বা `Esc`) চাপলেই সম্পূর্ণ লেখা এডিট হয়ে পেস্ট হয়ে যাবে।
+  * **Hold-to-Talk:** কিবোর্ডের `Right Alt` (AltGr) বা `Right Shift` চেপে ধরে কথা বলুন, ছেড়ে দিলেই **১.২–১.৫ সেকেন্ডে** টেক্সট পেস্ট হয়ে যাবে।
+  * **Hands-Free Mode:** `Right Alt` (বা `Right Shift`) একবার হালকা ট্যাপ করুন। মাইক চালু থাকবে, হাত ছেড়ে দিয়ে রিল্যাক্স হয়ে যতখুশি কথা বলুন। কথা শেষ হলে আবার ট্যাপ করলেই (বা `Esc` চাপলেই) হুবহু টেক্সট পেস্ট হয়ে যাবে।
+* **আনইন্সটল:** কোনো কারণে আনইন্সটল করতে চাইলে `./uninstall.sh` রান করলেই সম্পূর্ণ সিস্টেম ক্লিন হয়ে যাবে।
 
 ---
 

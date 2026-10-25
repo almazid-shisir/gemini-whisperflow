@@ -7,5 +7,5 @@
   "sound_feedback": false,
   "notify": true,
   "min_hold_seconds": 0.35,
-  "silence_threshold_db": -38.0
+  "silence_threshold_db": -45.0
 }

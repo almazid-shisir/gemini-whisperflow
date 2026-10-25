@@ -1,7 +1,7 @@
 #!/bin/bash
 # ==============================================================================
 # Gemini WhisperFlow Linux Installer
-# High-Precision Voice Dictation & Thought Restructuring Engine
+# Single-Pass Ultra-Fast Voice Dictation Engine
 # ==============================================================================
 
 set -e
@@ -11,16 +11,17 @@ INSTALL_DIR="$HOME/.local/share/gemini-voice-flow"
 CONFIG_DIR="$HOME/.config/gemini-voice-flow"
 VENV_DIR="$INSTALL_DIR/venv"
 BIN_DIR="$HOME/.local/bin"
+USER_UID="$(id -u)"
 
 echo ""
 echo "======================================================================"
-echo "🚀 Installing Gemini WhisperFlow (Two-Stage Voice Dictation Engine)"
+echo "🚀 Installing Gemini WhisperFlow (Single-Pass Ultra-Fast Voice Engine)"
 echo "======================================================================"
 echo ""
 
 # 1. Detect sudo / root
 SUDO=""
-if [ "$(id -u)" -ne 0 ]; then
+if [ "$USER_UID" -ne 0 ]; then
   if command -v sudo &>/dev/null; then
     SUDO="sudo"
   fi
@@ -70,16 +71,30 @@ fi
 "$VENV_DIR/bin/pip" install -r "$SCRIPT_DIR/requirements.txt" --quiet
 echo "✅ Python environment ready."
 
-# 4. Install CLI binary & Service definitions
+# 4. Install Application Files, CLI Binary & Service definitions
 echo ""
 echo "[3/4] Installing gemini-flow CLI and systemd background service..."
 mkdir -p "$BIN_DIR" "$CONFIG_DIR" "$HOME/.config/systemd/user" "$HOME/.config/autostart" "$HOME/.local/share/applications"
+
+# Copy application script to permanent installation directory
+cp -f "$SCRIPT_DIR/gemini_flow.py" "$INSTALL_DIR/gemini_flow.py"
+cp -f "$SCRIPT_DIR/config.example.json" "$INSTALL_DIR/config.example.json"
 
 # Copy CLI binary
 cp -f "$SCRIPT_DIR/gemini-flow" "$BIN_DIR/gemini-flow"
 chmod +x "$BIN_DIR/gemini-flow"
 
-# Write systemd user service with absolute paths
+# Ensure ~/.local/bin is in PATH for future shells
+if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
+  if [ -f "$HOME/.bashrc" ] && ! grep -q "$BIN_DIR" "$HOME/.bashrc"; then
+    echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"
+  fi
+  if [ -f "$HOME/.zshrc" ] && ! grep -q "$BIN_DIR" "$HOME/.zshrc"; then
+    echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.zshrc"
+  fi
+fi
+
+# Write systemd user service with concrete user runtime paths
 cat << EOF_SERVICE > "$HOME/.config/systemd/user/gemini-voice-flow.service"
 [Unit]
 Description=Gemini WhisperFlow Daemon (Instant Linux Speech-to-Text)
@@ -89,9 +104,9 @@ After=graphical-session.target
 Type=simple
 Environment="DISPLAY=:0"
 Environment="PYTHONUNBUFFERED=1"
-Environment="XDG_RUNTIME_DIR=/run/user/%U"
+Environment="XDG_RUNTIME_DIR=/run/user/$USER_UID"
 Environment="PATH=$BIN_DIR:/usr/local/bin:/usr/bin:/bin"
-ExecStart=$VENV_DIR/bin/python $SCRIPT_DIR/gemini_flow.py
+ExecStart=$VENV_DIR/bin/python $INSTALL_DIR/gemini_flow.py
 Restart=always
 RestartSec=2
 
@@ -128,11 +143,11 @@ EOF_APP
 # 5. Interactive Configuration Wizard
 echo ""
 echo "[4/4] Configuring Gemini API Key and Trigger Key..."
-# Run interactive setup wizard via python virtual environment
-"$VENV_DIR/bin/python" "$SCRIPT_DIR/gemini_flow.py" --setup
+# Run interactive setup wizard using installed python runtime
+"$VENV_DIR/bin/python" "$INSTALL_DIR/gemini_flow.py" --setup
 
 # 6. Start service
-if command -v systemctl &>/dev/null && [ -d /run/user/"$(id -u)" ]; then
+if command -v systemctl &>/dev/null && [ -d "/run/user/$USER_UID" ]; then
   systemctl --user daemon-reload || true
   systemctl --user enable gemini-voice-flow.service || true
   systemctl --user restart gemini-voice-flow.service || true
@@ -150,7 +165,7 @@ echo "  gemini-flow test      Run audio & API self-test"
 echo "  gemini-flow setup     Reconfigure API key or trigger"
 echo "  gemini-flow restart   Restart daemon"
 echo ""
-echo "Note: If 'gemini-flow' command is not recognized, add ~/.local/bin to PATH:"
+echo "Note: If 'gemini-flow' command is not recognized in current terminal, run:"
 echo "  export PATH=\"\$HOME/.local/bin:\$PATH\""
 echo "======================================================================"
 echo ""

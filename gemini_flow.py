@@ -437,8 +437,8 @@ def interactive_setup():
         ok, msg = verify_gemini_api_key(api_key, cfg.get("transcribe_model", "gemini-3.5-transcribe"), cfg.get("cleanup_model", "gemini-3.5-flash-lite"))
         if ok:
             Logger.success("Google Gemini API Key verified successfully!")
-            print(f"   • Stage 1 Model: {Logger.GREEN}{cfg.get('transcribe_model', 'gemini-3.5-transcribe')}{Logger.RESET} [READY]")
-            print(f"   • Stage 2 Model: {Logger.GREEN}{cfg.get('cleanup_model', 'gemini-3.5-flash-lite')}{Logger.RESET} [READY]")
+            print(f"   • Ultra-Fast Engine : {Logger.GREEN}{cfg.get('cleanup_model', 'gemini-3.5-flash-lite')}{Logger.RESET} [READY]")
+            print(f"   • ASR Backup Engine  : {Logger.GREEN}{cfg.get('transcribe_model', 'gemini-3.5-transcribe')}{Logger.RESET} [READY]")
             cfg["gemini_api_key"] = api_key
             break
         else:
