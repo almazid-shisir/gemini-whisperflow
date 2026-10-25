@@ -531,8 +531,16 @@ def run_self_test(cfg):
         Logger.error("No audio recorder available on system!")
         return False
 
+    env = os.environ.copy()
+    if "XDG_RUNTIME_DIR" not in env:
+        uid = os.getuid()
+        user_runtime = f"/run/user/{uid}"
+        if os.path.exists(user_runtime):
+            env["XDG_RUNTIME_DIR"] = user_runtime
+    env["DISPLAY"] = env.get("DISPLAY", ":0")
+
     try:
-        proc = subprocess.Popen(recorder, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        proc = subprocess.Popen(recorder, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         time.sleep(2.0)
         proc.terminate()
         proc.wait(timeout=1.0)
