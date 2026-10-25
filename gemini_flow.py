@@ -45,7 +45,7 @@ DEFAULT_CONFIG = {
     "gemini_api_key": "",
     "transcribe_model": "gemini-3.5-transcribe",
     "cleanup_model": "gemini-3.5-flash-lite",
-    "trigger_key": "ctrl_r",
+    "trigger_key": "smart",
     "clean_transcript": True,
     "sound_feedback": False,
     "notify": True,
@@ -211,27 +211,37 @@ def is_matching_key(key, target_str):
     """Check whether a pressed pynput key matches the configured target string."""
     s = target_str.lower().strip().replace("-", "_").replace(" ", "_")
     
+    # Smart Multi-Key Trigger: Accepts Right Shift OR Right Alt OR Right Control
+    if s in ("smart", "auto", "multi", "default"):
+        if key == keyboard.Key.shift_r:
+            return True
+        if key == keyboard.Key.alt_r or getattr(key, "name", None) in ("alt_r", "alt_gr"):
+            return True
+        if key == keyboard.Key.ctrl_r or getattr(key, "name", None) in ("ctrl_r", "control_r"):
+            return True
+        return False
+
+    # Right Shift
+    if s in ("shift_r", "right_shift", "rshift"):
+        return key == keyboard.Key.shift_r
+    # Right Alt / AltGr
+    elif s in ("alt_r", "right_alt", "ralt", "alt_gr", "altgr"):
+        return key == keyboard.Key.alt_r or getattr(key, "name", None) in ("alt_r", "alt_gr")
     # Right Control (Default & Recommended)
-    if s in ("ctrl_r", "right_ctrl", "rctrl", "control_r"):
-        return key == keyboard.Key.ctrl_r
+    elif s in ("ctrl_r", "right_ctrl", "rctrl", "control_r"):
+        return key == keyboard.Key.ctrl_r or getattr(key, "name", None) in ("ctrl_r", "control_r")
     # Left Control
     elif s in ("ctrl_l", "left_ctrl", "lctrl", "control_l"):
         return key == keyboard.Key.ctrl_l
     # Either Control
     elif s in ("ctrl", "control"):
         return key in (keyboard.Key.ctrl, keyboard.Key.ctrl_r, keyboard.Key.ctrl_l)
-    # Right Shift
-    elif s in ("shift_r", "right_shift", "rshift"):
-        return key == keyboard.Key.shift_r
     # Left Shift
     elif s in ("shift_l", "left_shift", "lshift"):
         return key == keyboard.Key.shift_l or key == keyboard.Key.shift
     # Either Shift
     elif s in ("shift",):
         return key in (keyboard.Key.shift, keyboard.Key.shift_r, keyboard.Key.shift_l)
-    # Right Alt / AltGr
-    elif s in ("alt_r", "right_alt", "ralt", "alt_gr", "altgr"):
-        return key == keyboard.Key.alt_r or key == getattr(keyboard.Key, "alt_gr", None)
     # Left Alt
     elif s in ("alt_l", "left_alt", "lalt"):
         return key == keyboard.Key.alt_l
@@ -421,25 +431,27 @@ def interactive_setup():
 
     # Step 2: Trigger Shortcut Key Selection
     print(f"\n{Logger.BOLD}Choose your preferred Dictation Trigger Key:{Logger.RESET}")
-    print(f"  {Logger.GREEN}[1] Right Control (ctrl_r){Logger.RESET} - {Logger.BOLD}★ Recommended{Logger.RESET} (Ergonomic, no uppercase interference)")
+    print(f"  {Logger.GREEN}[1] Smart Multi-Trigger (smart){Logger.RESET} - {Logger.BOLD}★ Recommended{Logger.RESET} (Accepts Right Shift OR Right Alt)")
     print(f"  [2] Right Shift   (shift_r)")
     print(f"  [3] Right Alt     (alt_r / AltGr)")
-    print(f"  [4] Function Key  (f9)")
-    print(f"  [5] Custom Key")
+    print(f"  [4] Right Control (ctrl_r)")
+    print(f"  [5] Function Key  (f9)")
+    print(f"  [6] Custom Key")
     
-    current_key = cfg.get("trigger_key", "ctrl_r")
-    key_choice = input(f"\nSelect [1-5] (Current: {current_key}): ").strip()
+    current_key = cfg.get("trigger_key", "smart")
+    key_choice = input(f"\nSelect [1-6] (Current: {current_key}): ").strip()
 
     key_map = {
-        "1": "ctrl_r",
+        "1": "smart",
         "2": "shift_r",
         "3": "alt_r",
-        "4": "f9"
+        "4": "ctrl_r",
+        "5": "f9"
     }
 
     if key_choice in key_map:
         cfg["trigger_key"] = key_map[key_choice]
-    elif key_choice == "5":
+    elif key_choice == "6":
         cust = input("Enter custom key name (e.g. caps_lock, f8, insert): ").strip().lower()
         if cust:
             cfg["trigger_key"] = cust
@@ -763,6 +775,7 @@ class VoiceFlowDaemon:
             return
 
         Logger.info(f"🔴 Recording active: [{self.trigger_label}] (Hold to talk, or tap to toggle hands-free)...")
+        self.show_notification("🔴 Recording...", f"Listening on [{self.trigger_label}]. Speak now!", timeout_ms=1800)
         self.play_sound("bell")
 
     def _stop_recording_locked(self, hold_duration):
