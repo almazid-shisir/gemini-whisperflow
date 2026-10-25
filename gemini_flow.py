@@ -640,6 +640,8 @@ class VoiceFlowDaemon:
         threading.Thread(target=_notify, daemon=True).start()
 
     def on_press(self, key):
+        Logger.info(f"[KEY-DETECT] Pressed: {key} (repr: {repr(key)})")
+
         # 1. Escape key stops/cancels any active recording
         if key == keyboard.Key.esc:
             with self.lock:
