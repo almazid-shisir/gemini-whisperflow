@@ -1,8 +1,14 @@
 __pycache__/
 *.pyc
+*.pyo
 venv/
 .venv/
+config.json
 /config.json
+.env
+*.key
 /tmp/
 *.wav
+*.mp3
+*.ogg
 *.log

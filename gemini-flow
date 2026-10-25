@@ -1,30 +1,53 @@
 #!/bin/bash
-# Gemini WhisperFlow CLI Manager (Ultra-Fast Edition)
+# Gemini WhisperFlow CLI Manager
+# High-Precision Voice Dictation & Thought Restructuring Engine
+
+set -e
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENV_PYTHON="$HOME/.local/share/gemini-voice-flow/venv/bin/python"
-SCRIPT="$REPO_DIR/gemini_flow.py"
+CONFIG_PATH="$HOME/.config/gemini-voice-flow/config.json"
 
-if [ ! -f "$SCRIPT" ]; then
-  # Fallback to search known paths if invoked from ~/.local/bin directly
-  CANDIDATE="$(find "$HOME" -maxdepth 4 -name "gemini_flow.py" 2>/dev/null | head -n 1)"
-  if [ -n "$CANDIDATE" ]; then
-    SCRIPT="$CANDIDATE"
-  fi
+# Discover script path
+SCRIPT=""
+if [ -f "$REPO_DIR/gemini_flow.py" ]; then
+  SCRIPT="$REPO_DIR/gemini_flow.py"
+elif [ -f "$HOME/gemini-whisperflow/gemini_flow.py" ]; then
+  SCRIPT="$HOME/gemini-whisperflow/gemini_flow.py"
+else
+  SCRIPT="$(find "$HOME" -maxdepth 4 -name "gemini_flow.py" 2>/dev/null | head -n 1)"
 fi
 
 RUN_PYTHON="python3"
-if [ -f "$VENV_PYTHON" ]; then
+if [ -x "$VENV_PYTHON" ]; then
   RUN_PYTHON="$VENV_PYTHON"
 fi
 
+if [ -z "$SCRIPT" ] || [ ! -f "$SCRIPT" ]; then
+  echo "❌ Error: Could not locate gemini_flow.py. Please run from repository or reinstall."
+  exit 1
+fi
+
 case "$1" in
+  setup)
+    "$RUN_PYTHON" "$SCRIPT" --setup
+    ;;
+  test)
+    "$RUN_PYTHON" "$SCRIPT" --test
+    ;;
+  run)
+    shift
+    exec "$RUN_PYTHON" "$SCRIPT" "$@"
+    ;;
   start)
     if command -v systemctl &>/dev/null && [ -d /run/user/"$(id -u)" ]; then
       systemctl --user daemon-reload
       systemctl --user start gemini-voice-flow
-      echo "Gemini WhisperFlow background service started."
+      sleep 0.5
+      systemctl --user status gemini-voice-flow --no-pager
     else
+      pkill -f "gemini_flow.py" 2>/dev/null || true
+      sleep 0.3
       nohup "$RUN_PYTHON" "$SCRIPT" >/dev/null 2>&1 &
       echo "Gemini WhisperFlow started in background (PID: $!)."
     fi
@@ -32,41 +55,70 @@ case "$1" in
   stop)
     if command -v systemctl &>/dev/null && [ -d /run/user/"$(id -u)" ]; then
       systemctl --user stop gemini-voice-flow
-      echo "Gemini WhisperFlow stopped."
+      echo "Gemini WhisperFlow service stopped."
     else
-      pkill -f "gemini_flow.py" || true
-      echo "Gemini WhisperFlow stopped."
+      pkill -f "gemini_flow.py" 2>/dev/null || true
+      echo "Gemini WhisperFlow process stopped."
     fi
     ;;
   restart)
     if command -v systemctl &>/dev/null && [ -d /run/user/"$(id -u)" ]; then
+      systemctl --user daemon-reload
       systemctl --user restart gemini-voice-flow
-      echo "Gemini WhisperFlow restarted."
+      sleep 0.5
+      systemctl --user status gemini-voice-flow --no-pager
     else
-      pkill -f "gemini_flow.py" || true
+      pkill -f "gemini_flow.py" 2>/dev/null || true
       sleep 0.5
       nohup "$RUN_PYTHON" "$SCRIPT" >/dev/null 2>&1 &
-      echo "Gemini WhisperFlow restarted."
+      echo "Gemini WhisperFlow restarted (PID: $!)."
     fi
     ;;
   status)
     if command -v systemctl &>/dev/null && [ -d /run/user/"$(id -u)" ]; then
       systemctl --user status gemini-voice-flow --no-pager
     else
-      ps aux | grep "[g]emini_flow.py" || echo "Gemini WhisperFlow is not running."
+      if pgrep -f "gemini_flow.py" >/dev/null; then
+        echo "Gemini WhisperFlow is running in background:"
+        ps aux | grep "[g]emini_flow.py"
+      else
+        echo "Gemini WhisperFlow is NOT running."
+      fi
     fi
     ;;
   logs|log)
     if command -v journalctl &>/dev/null && [ -d /run/user/"$(id -u)" ]; then
-      journalctl --user -u gemini-voice-flow -f
+      journalctl --user -u gemini-voice-flow -f -o cat
     else
-      echo "Log follower is only available under systemd user sessions."
+      echo "Live journal logs are only available under systemd user sessions."
+      echo "You can also run directly with live terminal logs: gemini-flow run"
     fi
     ;;
-  run)
-    exec "$RUN_PYTHON" "$SCRIPT"
+  config)
+    EDITOR_CMD="${EDITOR:-nano}"
+    if [ ! -f "$CONFIG_PATH" ]; then
+      "$RUN_PYTHON" "$SCRIPT" --setup
+    else
+      $EDITOR_CMD "$CONFIG_PATH"
+    fi
     ;;
   *)
-    echo "Usage: gemini-flow {start|stop|restart|status|logs|run}"
+    echo "=========================================================="
+    echo "🚀 Gemini WhisperFlow CLI Manager"
+    echo "=========================================================="
+    echo "Usage: gemini-flow <command>"
+    echo ""
+    echo "Commands:"
+    echo "  setup         Launch interactive API key and trigger setup"
+    echo "  test          Run mic, API, and clipboard self-test diagnostics"
+    echo "  start         Start background service"
+    echo "  stop          Stop background service"
+    echo "  restart       Restart background service"
+    echo "  status        Check service health and running status"
+    echo "  logs          Stream live logs in real-time"
+    echo "  run           Run in foreground in current terminal"
+    echo "  run --debug   Run in foreground with verbose debug logging"
+    echo "  config        Edit configuration file (~/.config/gemini-voice-flow/config.json)"
+    echo "=========================================================="
     ;;
 esac

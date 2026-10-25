@@ -1,11 +1,24 @@
 #!/bin/bash
+# ==============================================================================
+# Gemini WhisperFlow Linux Installer
+# High-Precision Voice Dictation & Thought Restructuring Engine
+# ==============================================================================
+
 set -e
 
-echo "========================================================"
-echo "🚀 Installing Gemini WhisperFlow (Ultra-Fast Edition)"
-echo "========================================================"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+INSTALL_DIR="$HOME/.local/share/gemini-voice-flow"
+CONFIG_DIR="$HOME/.config/gemini-voice-flow"
+VENV_DIR="$INSTALL_DIR/venv"
+BIN_DIR="$HOME/.local/bin"
 
-# Determine if running with sudo / root
+echo ""
+echo "======================================================================"
+echo "🚀 Installing Gemini WhisperFlow (Two-Stage Voice Dictation Engine)"
+echo "======================================================================"
+echo ""
+
+# 1. Detect sudo / root
 SUDO=""
 if [ "$(id -u)" -ne 0 ]; then
   if command -v sudo &>/dev/null; then
@@ -13,13 +26,16 @@ if [ "$(id -u)" -ne 0 ]; then
   fi
 fi
 
-# 1. System packages installation
-echo "[1/5] Detecting package manager and installing dependencies..."
+# 2. System Packages Installation
+echo "[1/4] Installing Linux system dependencies..."
 if command -v apt-get &>/dev/null; then
-  echo "Detected Debian/Ubuntu system."
+  echo "Detected Debian/Ubuntu/Mint/Pop!_OS system."
   $SUDO apt-get update -qq || true
   $SUDO apt-get install -y --no-install-recommends \
     alsa-utils \
+    pipewire \
+    pipewire-audio \
+    pipewire-pulse \
     xdotool \
     xclip \
     libnotify-bin \
@@ -30,59 +46,40 @@ if command -v apt-get &>/dev/null; then
     curl \
     tar \
     wl-clipboard || true
-elif command -v dnf &>/dev/null; then
-  echo "Detected Fedora/RHEL system."
-  $SUDO dnf install -y alsa-utils xdotool xclip libnotify python3 python3-pip ffmpeg curl tar wl-clipboard || true
 elif command -v pacman &>/dev/null; then
-  echo "Detected Arch Linux system."
-  $SUDO pacman -Sy --noconfirm alsa-utils xdotool xclip libnotify python ffmpeg curl tar wl-clipboard || true
+  echo "Detected Arch Linux / Manjaro system."
+  $SUDO pacman -Sy --noconfirm alsa-utils pipewire pipewire-pulse xdotool xclip libnotify python ffmpeg curl tar wl-clipboard || true
+elif command -v dnf &>/dev/null; then
+  echo "Detected Fedora / RHEL system."
+  $SUDO dnf install -y alsa-utils pipewire xdotool xclip libnotify python3 python3-pip ffmpeg curl tar wl-clipboard || true
 elif command -v zypper &>/dev/null; then
   echo "Detected openSUSE system."
-  $SUDO zypper install -y alsa-utils xdotool xclip libnotify-tools python3 python3-pip ffmpeg curl tar wl-clipboard || true
+  $SUDO zypper install -y alsa-utils pipewire xdotool xclip libnotify-tools python3 python3-pip ffmpeg curl tar wl-clipboard || true
 else
-  echo "Notice: Non-standard package manager. Please ensure alsa-utils, xdotool, xclip, ffmpeg and python3 are installed."
-fi
-
-# 2. Check and Install Official Google Gemini API CLI
-echo "[2/5] Checking Google Gemini API CLI (gemini-api)..."
-if ! command -v gemini-api &>/dev/null && [ ! -f "/usr/local/bin/gemini-api" ]; then
-  echo "Installing official gemini-api CLI via install script..."
-  curl -fsSL https://raw.githubusercontent.com/google-gemini/gemini-api-cli/main/scripts/install.sh | bash || true
-fi
-
-if command -v gemini-api &>/dev/null || [ -f "/usr/local/bin/gemini-api" ]; then
-  echo "✅ Gemini API CLI is ready."
-else
-  echo "⚠️ Note: gemini-api CLI install script skipped or failed; fallback direct API engine will be active."
+  echo "Notice: Non-standard package manager. Please ensure alsa-utils, pipewire, xdotool, xclip, ffmpeg and python3 are installed."
 fi
 
 # 3. Setup Python Virtual Environment
-echo "[3/5] Setting up isolated Python virtual environment..."
-INSTALL_DIR="$HOME/.local/share/gemini-voice-flow"
+echo ""
+echo "[2/4] Setting up isolated Python virtual environment..."
 mkdir -p "$INSTALL_DIR"
-python3 -m venv "$INSTALL_DIR/venv"
-"$INSTALL_DIR/venv/bin/pip" install --upgrade pip --quiet
-"$INSTALL_DIR/venv/bin/pip" install -r requirements.txt --quiet
-
-# 4. Setup Configuration
-echo "[4/5] Initializing user configuration..."
-CONFIG_DIR="$HOME/.config/gemini-voice-flow"
-mkdir -p "$CONFIG_DIR"
-if [ ! -f "$CONFIG_DIR/config.json" ]; then
-  cp config.example.json "$CONFIG_DIR/config.json"
-  echo "Created default configuration at: $CONFIG_DIR/config.json"
+if [ ! -d "$VENV_DIR" ]; then
+  python3 -m venv "$VENV_DIR"
 fi
+"$VENV_DIR/bin/pip" install --upgrade pip --quiet
+"$VENV_DIR/bin/pip" install -r "$SCRIPT_DIR/requirements.txt" --quiet
+echo "✅ Python environment ready."
 
-# 5. Install CLI command & Systemd Service
-echo "[5/5] Registering gemini-flow CLI command and desktop autostart..."
-mkdir -p "$HOME/.local/bin" "$HOME/.config/systemd/user" "$HOME/.config/autostart" "$HOME/.local/share/applications"
+# 4. Install CLI binary & Service definitions
+echo ""
+echo "[3/4] Installing gemini-flow CLI and systemd background service..."
+mkdir -p "$BIN_DIR" "$CONFIG_DIR" "$HOME/.config/systemd/user" "$HOME/.config/autostart" "$HOME/.local/share/applications"
 
 # Copy CLI binary
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cp "$SCRIPT_DIR/gemini-flow" "$HOME/.local/bin/gemini-flow"
-chmod +x "$HOME/.local/bin/gemini-flow"
+cp -f "$SCRIPT_DIR/gemini-flow" "$BIN_DIR/gemini-flow"
+chmod +x "$BIN_DIR/gemini-flow"
 
-# Write optimized systemd user service with exact path
+# Write systemd user service with absolute paths
 cat << EOF_SERVICE > "$HOME/.config/systemd/user/gemini-voice-flow.service"
 [Unit]
 Description=Gemini WhisperFlow Daemon (Instant Linux Speech-to-Text)
@@ -92,8 +89,9 @@ After=graphical-session.target
 Type=simple
 Environment="DISPLAY=:0"
 Environment="PYTHONUNBUFFERED=1"
-Environment="PATH=/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin"
-ExecStart=$INSTALL_DIR/venv/bin/python $SCRIPT_DIR/gemini_flow.py
+Environment="XDG_RUNTIME_DIR=/run/user/%U"
+Environment="PATH=$BIN_DIR:/usr/local/bin:/usr/bin:/bin"
+ExecStart=$VENV_DIR/bin/python $SCRIPT_DIR/gemini_flow.py
 Restart=always
 RestartSec=2
 
@@ -101,13 +99,7 @@ RestartSec=2
 WantedBy=default.target
 EOF_SERVICE
 
-# Enable systemd user service if systemctl is available
-if command -v systemctl &>/dev/null && [ -d /run/user/"$(id -u)" ]; then
-  systemctl --user daemon-reload || true
-  systemctl --user enable gemini-voice-flow.service || true
-fi
-
-# Desktop autostart entry
+# Register desktop autostart entry
 cat << 'EOF_DESKTOP' > "$HOME/.config/autostart/gemini-whisperflow.desktop"
 [Desktop Entry]
 Type=Application
@@ -120,7 +112,7 @@ X-GNOME-Autostart-enabled=true
 StartupNotify=false
 EOF_DESKTOP
 
-# Application launcher entry
+# Desktop application launcher icon
 cat << 'EOF_APP' > "$HOME/.local/share/applications/gemini-whisperflow.desktop"
 [Desktop Entry]
 Type=Application
@@ -133,18 +125,32 @@ Categories=Utility;Accessibility;
 StartupNotify=false
 EOF_APP
 
+# 5. Interactive Configuration Wizard
 echo ""
-echo "========================================================"
-echo "🎉 Installation completed successfully!"
-echo "========================================================"
-echo "Next Steps:"
-echo "1. Set your Gemini API key:"
-echo "   nano ~/.config/gemini-voice-flow/config.json"
-echo "   (or export GEMINI_API_KEY=\"your_key_here\")"
+echo "[4/4] Configuring Gemini API Key and Trigger Key..."
+# Run interactive setup wizard via python virtual environment
+"$VENV_DIR/bin/python" "$SCRIPT_DIR/gemini_flow.py" --setup
+
+# 6. Start service
+if command -v systemctl &>/dev/null && [ -d /run/user/"$(id -u)" ]; then
+  systemctl --user daemon-reload || true
+  systemctl --user enable gemini-voice-flow.service || true
+  systemctl --user restart gemini-voice-flow.service || true
+fi
+
 echo ""
-echo "2. Start the daemon:"
-echo "   gemini-flow start"
+echo "======================================================================"
+echo "🎉 Gemini WhisperFlow is fully installed and running in the background!"
+echo "======================================================================"
 echo ""
-echo "3. Dictate anywhere:"
-echo "   Press [CapsLock] to talk, press [CapsLock] again to paste!"
-echo "========================================================"
+echo "Quick Management Commands:"
+echo "  gemini-flow status    Check running status"
+echo "  gemini-flow logs      Follow live logs"
+echo "  gemini-flow test      Run audio & API self-test"
+echo "  gemini-flow setup     Reconfigure API key or trigger"
+echo "  gemini-flow restart   Restart daemon"
+echo ""
+echo "Note: If 'gemini-flow' command is not recognized, add ~/.local/bin to PATH:"
+echo "  export PATH=\"\$HOME/.local/bin:\$PATH\""
+echo "======================================================================"
+echo ""
