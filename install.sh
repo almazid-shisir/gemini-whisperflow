@@ -92,6 +92,9 @@ if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
   if [ -f "$HOME/.zshrc" ] && ! grep -q "$BIN_DIR" "$HOME/.zshrc"; then
     echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.zshrc"
   fi
+  if [ -f "$HOME/.zshenv" ] && ! grep -q "$BIN_DIR" "$HOME/.zshenv"; then
+    echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.zshenv"
+  fi
 fi
 
 # Write systemd user service with concrete user runtime paths
