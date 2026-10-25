@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
 """
-Gemini WhisperFlow Daemon for Linux (Hybrid Push-to-Talk + Hands-Free Lock Engine)
+Gemini WhisperFlow Daemon for Linux (Ultra-Fast & Smart Speech Restructuring Engine)
 Controls:
   1. Hold Right Shift (shift_r): Speak while holding, release to stop & paste.
-  2. Double-Tap Right Shift (<0.4s between taps): Hands-Free Mode (locks mic ON).
+  2. Double-Tap Right Shift (<0.45s between taps): Hands-Free Mode (locks mic ON).
      Speak freely for 5, 10, 15+ minutes without holding anything.
      Tap Right Shift (or Esc) once when done to finish and paste!
 
-High-Accuracy 2-Stage Pipeline (Verbatim Audio Transcription -> Deep Fluff Cleaner):
-  - Stage 1: Ultra-fast verbatim audio transcription.
-  - Stage 2: Deep language cleaning (removes rambling, hesitations, repetitive phrases, converts 'সিও' -> 'CEO').
-Unlimited token capacity and adaptive timeout scaling.
+High-Accuracy 2-Stage Pipeline (Audio Transcription -> Deep Fluff & Phonetic Cleaner):
+  - Stage 1: Fast audio-to-text transcription with Bengali/English context.
+  - Stage 2: Deep language cleaning (removes rambling, hesitations, repetitive phrases,
+             intelligently maps tech phonetics like 'ভার্সেল' -> 'Vercel', 'সিও' -> 'CEO').
+Robust connection pooling with auto-retry and non-blocking clipboard injection.
 """
 
 import os
@@ -22,6 +23,8 @@ import base64
 import shutil
 import tempfile
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 import subprocess
 import threading
 from pynput import keyboard
@@ -41,29 +44,39 @@ DEFAULT_CONFIG = {
     "double_tap_interval": 0.45
 }
 
-STAGE1_AUDIO_PROMPT = """You are an accurate, fast speech-to-text transcriber.
-Transcribe spoken audio verbatim in original language (Bengali, English, or Banglish).
+STAGE1_AUDIO_PROMPT = """You are an accurate, fast speech-to-text transcriber specializing in Bengali, English, and Banglish.
+Transcribe the spoken audio verbatim in its original spoken language.
+Pay special attention to spoken tech terms, brands, and company names (e.g. Vercel, Google, GitHub, Python, Linux, CEO).
 Output only the transcribed words without explanations, notes, or markdown tags.
 If the audio contains only background noise, clicks, or silence, output an empty string."""
 
 STAGE2_TEXT_CLEANUP_PROMPT = """You are an expert spoken-to-written language editor and thought clarifier for voice typing.
 The input is a raw spoken transcript containing hesitations, conversational fillers, self-corrections, and repetitive rambling.
 
-YOUR TASK:
+YOUR MISSION:
 Transform the messy transcript into a clean, direct, natural, and beautifully structured message.
 
 STRICT EDITING RULES:
 1. STRIP ALL CONVERSATIONAL FILLERS & CRUTCHES:
    - Eliminate filler phrases ruthlessly:
      * "আমি বলতে চাইলাম", "তো এই আর কি বিষয়", "মানে", "কেমন জানি", "বুঝছ?", "মানে কি আর বলি?", "তো এই", "আর কি", "আসলে", "এই ধরেন", "উম", "যাই হোক", "তো এই হচ্ছে বিষয়", "এখন আর কি বলি?", "এই বলতে চাইলাম আর কি", "এত ইয়া হইলো", "uh", "um", "er", "like", "you know", "basically".
-2. ELIMINATE REPETITION & STRUCTURE THOUGHTS:
-   - If the speaker repeats the same idea or sentence multiple times, merge them into ONE crisp, well-formed sentence.
-   - Standardize spoken tech words & Banglish: "সিও" -> "CEO", "ভিডিও" -> "ভিডিও", "ইউটিউব" -> "YouTube", "পাইথন" -> "Python", "এইচডি" -> "HD", "৪কে" -> "4K", "এমবি" -> "MB", "জিবি" -> "GB".
+2. RESOLVE PHONETIC TECH TERMS & PROPER NOUNS:
+   - Accurately recognize spoken brand, platform, and tech terminology:
+     * "ভার্সেল" / "ভার্সেলের" -> "Vercel" / "Vercel-এর" (NOT "ভারত")
+     * "সিও" / "সিইও" -> "CEO"
+     * "ইউটিউব" -> "YouTube"
+     * "টেলিগ্রাম" -> "Telegram"
+     * "গিটহাব" -> "GitHub"
+     * "পাইথন" -> "Python"
+     * "লিনাক্স" -> "Linux"
+     * "এইচডি" -> "HD", "৪কে" -> "4K", "এমবি" -> "MB", "জিবি" -> "GB"
+3. ELIMINATE REPETITION & STRUCTURE THOUGHTS:
+   - If the speaker repeats the same idea or question multiple times, merge them into ONE crisp, well-formed sentence.
    - Punctuate cleanly with দাঁড়ি (।), কমা (,), and প্রশ্নবোধক চিহ্ন (?).
-3. PRESERVE INTENT & SPEAKER PERSPECTIVE:
+4. PRESERVE INTENT & SPEAKER PERSPECTIVE:
    - Maintain the speaker's own perspective (আমি, আমার, তুমি, ভাইয়া).
-   - Keep all factual details, names, ideas, and questions intact.
-   - Do NOT converse with the speaker or add your own thoughts.
+   - Keep all factual details, names, questions, and emotion intact.
+   - Do NOT converse with the speaker or add unrelated thoughts.
 
 OUTPUT RULE:
 - Output ONLY the final cleaned, structured text. Absolutely no preamble, markdown code blocks, or notes."""
@@ -146,6 +159,19 @@ def is_matching_key(key, target_str):
         except Exception:
             return False
 
+def create_robust_session():
+    """Create a persistent HTTP session with automatic reconnection and keep-alive."""
+    session = requests.Session()
+    retries = Retry(
+        total=2,
+        backoff_factor=0.3,
+        status_forcelist=[500, 502, 503, 504],
+        raise_on_status=False
+    )
+    adapter = HTTPAdapter(max_retries=retries, pool_connections=2, pool_maxsize=4)
+    session.mount("https://", adapter)
+    return session
+
 class VoiceFlowDaemon:
     def __init__(self, cfg):
         self.cfg = cfg
@@ -162,11 +188,7 @@ class VoiceFlowDaemon:
         self.min_hold_seconds = float(cfg.get("min_hold_seconds", 0.35))
         self.double_tap_interval = float(cfg.get("double_tap_interval", 0.45))
 
-        # Persistent HTTP connection session with pre-warmed connection pool
-        self.session = requests.Session()
-        adapter = requests.adapters.HTTPAdapter(pool_connections=2, pool_maxsize=4, max_retries=1)
-        self.session.mount("https://", adapter)
-
+        self.session = create_robust_session()
         threading.Thread(target=self._prewarm_connection, daemon=True).start()
 
     def _prewarm_connection(self):
@@ -234,7 +256,7 @@ class VoiceFlowDaemon:
                 return
             self.key_is_down = True
 
-            # Double-Tap Detection: if tapped again within 0.45s, lock hands-free mode!
+            # Double-Tap Detection: if tapped again within double_tap_interval, lock hands-free mode!
             if now - self.last_release_time < self.double_tap_interval:
                 self.is_locked_recording = True
                 print("[whisperflow] 🔒 HANDS-FREE LOCKED ON! Speak freely without holding keys. Tap Shift or Esc to finish.")
@@ -256,7 +278,6 @@ class VoiceFlowDaemon:
             self.key_is_down = False
             self.last_release_time = now
 
-            # If locked hands-free mode is active, do NOT stop on key release!
             if self.is_locked_recording:
                 return
 
@@ -369,13 +390,12 @@ class VoiceFlowDaemon:
     def _transcribe_audio_stage1(self, audio_file, mime_type, model, api_key, duration_sec):
         """
         Stage 1: Fast, robust audio-to-text transcription.
+        Handles disconnects with retry.
         """
         with open(audio_file, "rb") as f:
             audio_b64 = base64.b64encode(f.read()).decode("utf-8")
 
-        # Unlimited capacity: up to 16,384 tokens (~25,000 words)
         api_timeout = max(15.0, min(180.0, 15.0 + (duration_sec * 0.15)))
-
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
         payload = {
             "system_instruction": {"parts": [{"text": STAGE1_AUDIO_PROMPT}]},
@@ -383,7 +403,13 @@ class VoiceFlowDaemon:
             "generationConfig": {"temperature": 0.0, "maxOutputTokens": 16384}
         }
 
-        resp = self.session.post(url, json=payload, timeout=api_timeout)
+        try:
+            resp = self.session.post(url, json=payload, timeout=api_timeout)
+        except Exception:
+            # Recreate session on disconnect and retry once
+            self.session = create_robust_session()
+            resp = self.session.post(url, json=payload, timeout=api_timeout)
+
         if resp.status_code != 200:
             print(f"[whisperflow] Stage 1 API Error HTTP {resp.status_code}: {resp.text[:200]}")
             return None
@@ -399,7 +425,7 @@ class VoiceFlowDaemon:
         """
         Stage 2: Deep full-text language cleanup & restructuring.
         Operates on full transcribed text, eliminates fillers, hesitations, repetitive rambles,
-        and converts colloquial terms into clean written Bengali/English.
+        and accurately maps colloquial/phonetic terms ('ভার্সেল' -> 'Vercel', 'সিও' -> 'CEO').
         """
         prompt = get_cleanup_prompt()
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
@@ -409,7 +435,12 @@ class VoiceFlowDaemon:
             "generationConfig": {"temperature": 0.1, "maxOutputTokens": 16384}
         }
 
-        resp = self.session.post(url, json=payload, timeout=20.0)
+        try:
+            resp = self.session.post(url, json=payload, timeout=20.0)
+        except Exception:
+            self.session = create_robust_session()
+            resp = self.session.post(url, json=payload, timeout=20.0)
+
         if resp.status_code != 200:
             print(f"[whisperflow] Stage 2 API Error HTTP {resp.status_code}. Using raw transcript.")
             return raw_transcript
@@ -488,7 +519,8 @@ class VoiceFlowDaemon:
 
     def _paste_text(self, text):
         """
-        Ultra-fast clipboard injection and paste.
+        Safe non-blocking clipboard injection and paste.
+        Uses -quiet and proper termination to prevent lingering xclip processes.
         Supports Wayland (wl-copy + wtype) and X11 (xclip + xdotool).
         """
         env = os.environ.copy()
@@ -499,20 +531,16 @@ class VoiceFlowDaemon:
         if is_wayland and shutil.which("wl-copy"):
             try:
                 p = subprocess.Popen(["wl-copy"], stdin=subprocess.PIPE, env=env)
-                p.communicate(input=raw_bytes, timeout=1.0)
+                p.communicate(input=raw_bytes, timeout=0.8)
             except Exception:
                 pass
         elif shutil.which("xclip"):
-            try:
-                p = subprocess.Popen(["xclip", "-selection", "clipboard"], stdin=subprocess.PIPE, env=env)
-                p.communicate(input=raw_bytes, timeout=1.0)
-            except Exception:
-                pass
-            try:
-                p2 = subprocess.Popen(["xclip", "-selection", "primary"], stdin=subprocess.PIPE, env=env)
-                p2.communicate(input=raw_bytes, timeout=1.0)
-            except Exception:
-                pass
+            for sel in ("clipboard", "primary"):
+                try:
+                    p = subprocess.Popen(["xclip", "-selection", sel, "-quiet"], stdin=subprocess.PIPE, env=env)
+                    p.communicate(input=raw_bytes, timeout=0.8)
+                except Exception:
+                    pass
 
         time.sleep(0.04)
         if shutil.which("xdotool"):
