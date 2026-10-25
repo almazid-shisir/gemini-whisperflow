@@ -2,8 +2,8 @@
 """
 Gemini WhisperFlow Daemon for Linux (Ultra-Fast & Smart Speech Restructuring Engine)
 Push-to-Talk on Right Shift (shift_r): Hold to speak, release to transcribe, restructure & paste.
-Converts messy/rambling Bengali & English speech into direct, crisp, and beautifully structured text.
-Uses persistent HTTP keep-alive connection pool for sub-1.5s latency.
+Supports both ultra-fast short dictations and long audio (up to 15-20+ minutes).
+Adaptive dynamic timeouts, high output token capacity, and robust retry logic.
 """
 
 import os
@@ -94,10 +94,18 @@ def get_system_prompt(cfg):
 def compress_audio_fast(wav_path):
     """
     Compresses raw PCM WAV to 48k mono MP3 via ffmpeg if available.
-    Sub-second compression, cuts upload payload by 85%.
+    Dynamic timeout scaling ensures even 20-minute audio compresses safely.
     """
     if not shutil.which("ffmpeg"):
         return wav_path, "audio/wav"
+
+    try:
+        file_size_mb = os.path.getsize(wav_path) / (1024 * 1024)
+    except Exception:
+        file_size_mb = 1.0
+
+    # Base 3s + 1s per 2MB of raw audio
+    comp_timeout = max(3.0, 3.0 + (file_size_mb * 0.5))
 
     mp3_path = wav_path.rsplit(".", 1)[0] + ".mp3"
     cmd = [
@@ -109,11 +117,11 @@ def compress_audio_fast(wav_path):
         mp3_path
     ]
     try:
-        res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1.5)
+        res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=comp_timeout)
         if res.returncode == 0 and os.path.exists(mp3_path) and os.path.getsize(mp3_path) > 300:
             return mp3_path, "audio/mp3"
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[whisperflow] Warning: ffmpeg compression note: {e}")
 
     return wav_path, "audio/wav"
 
@@ -153,7 +161,6 @@ class VoiceFlowDaemon:
         adapter = requests.adapters.HTTPAdapter(pool_connections=2, pool_maxsize=4, max_retries=1)
         self.session.mount("https://", adapter)
 
-        # Pre-warm TLS connection in background thread
         threading.Thread(target=self._prewarm_connection, daemon=True).start()
 
     def _prewarm_connection(self):
@@ -174,7 +181,7 @@ class VoiceFlowDaemon:
             except Exception:
                 pass
 
-    def show_notification(self, title, message, timeout_ms=1800):
+    def show_notification(self, title, message, timeout_ms=2500):
         if not self.cfg.get("notify", True):
             return
         if not shutil.which("notify-send"):
@@ -190,7 +197,7 @@ class VoiceFlowDaemon:
                     "-a", "WhisperFlow",
                     title,
                     message
-                ], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1.0)
+                ], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1.5)
             except Exception:
                 pass
         threading.Thread(target=_notify, daemon=True).start()
@@ -265,7 +272,7 @@ class VoiceFlowDaemon:
             return
 
         key_label = self.trigger_key_str.replace("_", " ").title()
-        print(f"[whisperflow] 🔴 Hold [{key_label}] active: Listening...")
+        print(f"[whisperflow] 🔴 Recording active: [{key_label}]...")
         self.play_sound("bell")
 
     def _stop_recording_locked(self, hold_duration):
@@ -281,7 +288,7 @@ class VoiceFlowDaemon:
         if proc:
             proc.terminate()
             try:
-                proc.wait(timeout=0.6)
+                proc.wait(timeout=1.0)
             except subprocess.TimeoutExpired:
                 proc.kill()
 
@@ -289,9 +296,12 @@ class VoiceFlowDaemon:
             self._cleanup_files(wav_file)
             return
 
-        print(f"[whisperflow] ⚡ Released ({hold_duration:.2f}s). Transcribing...")
-        self.show_notification("Processing...", "Transcribing speech...")
-        threading.Thread(target=self._process_and_paste, args=(wav_file,), daemon=True).start()
+        mins = int(hold_duration // 60)
+        secs = int(hold_duration % 60)
+        dur_str = f"{mins}m {secs}s" if mins > 0 else f"{secs}s"
+        print(f"[whisperflow] ⚡ Processing audio ({dur_str})...")
+        self.show_notification("Processing...", f"Transcribing audio ({dur_str})...")
+        threading.Thread(target=self._process_and_paste, args=(wav_file, hold_duration), daemon=True).start()
 
     def _resolve_api_key(self):
         """Retrieve Gemini API key."""
@@ -316,13 +326,21 @@ class VoiceFlowDaemon:
 
         return ""
 
-    def _call_gemini_api(self, audio_file, mime_type, prompt, model, api_key):
+    def _call_gemini_api(self, audio_file, mime_type, prompt, model, api_key, audio_duration_sec):
         """
         Direct high-speed REST API call with persistent connection pooling.
-        Delivers clean transcript and restructuring in 1.2s - 1.8s.
+        Adaptive timeout and output capacity scaled for both short dictation and long speech.
         """
         with open(audio_file, "rb") as f:
             audio_b64 = base64.b64encode(f.read()).decode("utf-8")
+
+        # Dynamic output tokens: 1 min speech is ~150 words (~200 tokens).
+        # For 15 mins (~2250 words), 8192 tokens provides vast room without truncation.
+        estimated_mins = max(1, int(audio_duration_sec // 60) + 1)
+        output_token_limit = min(16384, max(800, estimated_mins * 600))
+
+        # Dynamic timeout: 10s base for short clips, scaling up to 120s for 15+ min dictations
+        api_timeout = max(15.0, min(180.0, 15.0 + (audio_duration_sec * 0.15)))
 
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
         payload = {
@@ -336,11 +354,11 @@ class VoiceFlowDaemon:
             }],
             "generationConfig": {
                 "temperature": 0.1,
-                "maxOutputTokens": 400
+                "maxOutputTokens": output_token_limit
             }
         }
 
-        resp = self.session.post(url, json=payload, timeout=10.0)
+        resp = self.session.post(url, json=payload, timeout=api_timeout)
         if resp.status_code != 200:
             print(f"[whisperflow] API HTTP {resp.status_code}: {resp.text[:200]}")
             return None
@@ -359,7 +377,7 @@ class VoiceFlowDaemon:
 
         return raw_text
 
-    def _process_and_paste(self, wav_path):
+    def _process_and_paste(self, wav_path, hold_duration_sec):
         t0 = time.time()
 
         if not wav_path or not os.path.exists(wav_path) or os.path.getsize(wav_path) < 2500:
@@ -383,7 +401,7 @@ class VoiceFlowDaemon:
             prompt = get_system_prompt(self.cfg)
 
             t_api0 = time.time()
-            text = self._call_gemini_api(audio_file, mime_type, prompt, model, api_key)
+            text = self._call_gemini_api(audio_file, mime_type, prompt, model, api_key, hold_duration_sec)
             t_api = time.time() - t_api0
             elapsed = round(time.time() - t0, 2)
 
@@ -393,7 +411,7 @@ class VoiceFlowDaemon:
                 return
 
             file_kb = round(os.path.getsize(audio_file) / 1024, 1)
-            print(f"[whisperflow] 🚀 Cleaned & Restructured in {elapsed}s (api: {t_api:.2f}s, comp: {t_compress:.2f}s, {file_kb}KB): \"{text[:75]}\"")
+            print(f"[whisperflow] 🚀 Transcribed in {elapsed}s (api: {t_api:.2f}s, comp: {t_compress:.2f}s, {file_kb}KB): \"{text[:75]}...\"")
 
             self.play_sound("complete")
             self._paste_text(text)
@@ -426,22 +444,22 @@ class VoiceFlowDaemon:
         if is_wayland and shutil.which("wl-copy"):
             try:
                 p = subprocess.Popen(["wl-copy"], stdin=subprocess.PIPE, env=env)
-                p.communicate(input=raw_bytes, timeout=0.5)
+                p.communicate(input=raw_bytes, timeout=1.0)
             except Exception:
                 pass
         elif shutil.which("xclip"):
             try:
                 p = subprocess.Popen(["xclip", "-selection", "clipboard"], stdin=subprocess.PIPE, env=env)
-                p.communicate(input=raw_bytes, timeout=0.5)
+                p.communicate(input=raw_bytes, timeout=1.0)
             except Exception:
                 pass
             try:
                 p2 = subprocess.Popen(["xclip", "-selection", "primary"], stdin=subprocess.PIPE, env=env)
-                p2.communicate(input=raw_bytes, timeout=0.5)
+                p2.communicate(input=raw_bytes, timeout=1.0)
             except Exception:
                 pass
 
-        time.sleep(0.02)
+        time.sleep(0.04)
         if shutil.which("xdotool"):
             try:
                 subprocess.run(
@@ -449,18 +467,18 @@ class VoiceFlowDaemon:
                     env=env,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
-                    timeout=0.8
+                    timeout=1.5
                 )
             except Exception:
                 pass
         elif is_wayland and shutil.which("wtype"):
             try:
-                subprocess.run(["wtype", "-M", "ctrl", "-k", "v", "-m", "ctrl"], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.8)
+                subprocess.run(["wtype", "-M", "ctrl", "-k", "v", "-m", "ctrl"], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1.5)
             except Exception:
                 pass
         elif shutil.which("ydotool"):
             try:
-                subprocess.run(["ydotool", "key", "29:1", "47:1", "47:0", "29:0"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.8)
+                subprocess.run(["ydotool", "key", "29:1", "47:1", "47:0", "29:0"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1.5)
             except Exception:
                 pass
 
@@ -472,7 +490,7 @@ def main():
     print("=" * 65)
     print("🚀 Gemini WhisperFlow (Hold Right Shift - Smart Restructuring)")
     print(f"Trigger : [Hold {trigger.replace('_', ' ').title()}]")
-    print(f"Engine  : Direct High-Speed API (Persistent Connection Pool)")
+    print(f"Engine  : Direct High-Speed API (Dynamic Timeout & Long Audio Support)")
     print(f"Model   : {config.get('model', 'gemini-3.5-flash-lite')}")
     print(f"Mode    : {'Clean Dictation' if config.get('clean_transcript', True) else 'Verbatim'}")
     print(f"Config  : {CONFIG_PATH}")
