@@ -1,37 +1,37 @@
 # 🎙️ Gemini WhisperFlow for Linux
 
-**High-Precision Linux Voice Dictation & Thought Restructuring Engine**
+**Single-Pass Ultra-Fast Linux Voice Dictation & Code-Switching Engine**
 
-Gemini WhisperFlow is a blazing-fast, privacy-first, zero-bloat voice dictation daemon for Linux (**X11 & Wayland**). It acts as an open-source, ultra-accurate alternative to tools like Wispr Flow and Superwhisper.
+Gemini WhisperFlow is a privacy-first, zero-bloat voice dictation daemon for Linux (**X11 & Wayland**). It acts as an open-source, ultra-accurate alternative to tools like Wispr Flow and Superwhisper.
 
-Powered by a **Two-Stage Hybrid Architecture**:
-1. **Stage 1 (ASR):** Dedicated **`gemini-3.5-transcribe`** for lightning-fast verbatim speech-to-text with zero hallucination.
-2. **Stage 2 (NLP):** **`gemini-3.5-flash-lite`** for deep thought restructuring, conversational fluff removal, and phonetic tech term standardization.
+Powered by a **Single-Pass Ultra-Fast Architecture**:
+* **Sub-1.5s End-to-End Latency:** Single high-precision multimodal request to `gemini-3.5-flash-lite` with in-memory audio processing.
+* **Zero Generative Hallucination:** Strict verbatim prompt retains natural colloquial phrasing (Bengali/English code-switching) without unauthorized summarizing, rewriting, or conversational drift.
+* **Deterministic Tech Normalization:** Client-side regex engine instantly standardizes tech terms (`Vercel`, `GitHub`, `CEO`, `Python`, `Linux`).
 
 ---
 
 ## ✨ Features & Highlights
 
-- **🎯 Two-Stage AI Pipeline (Balanced Speed + 100% Accuracy):**
-  - **Stage 1 (`gemini-3.5-transcribe`):** Specialized speech-to-text model from Google. Extremely fast (~1.2s–1.5s), transcribes exact spoken words in Bengali, English, or mixed Banglish without inventing fake text on background noise.
-  - **Stage 2 (`gemini-3.5-flash-lite`):** Refines raw thoughts, strips filler crutches (*"মানে"*, *"আসলে"*, *"তো এই আর কি"*, *"um"*, *"you know"*), fixes self-corrections, and maps spoken tech terms (*"ভার্সেল"* ➔ `Vercel`, *"সিও"* ➔ `CEO`, *"গিটহাব"* ➔ `GitHub`, *"টেলিগ্রাম"* ➔ `Telegram`).
+- **⚡ Blazing Fast Single-Pass Execution (<1.5s total):**
+  - Eliminates the slow double-hop API bottleneck. Audio is processed directly in RAM and transcribed in a single hop.
+  - In-memory pipe encoding eliminates local disk I/O latency.
 
-- **🕹️ Smart Dual-Mode Trigger (Right Control / `ctrl_r`):**
-  - **Hold-to-Talk (Push-to-Talk):** Hold `Right Control`, speak, and release to paste immediately.
-  - **Hands-Free Toggle:** Tap `Right Control` once (<0.35s) to lock mic ON. Speak freely with relaxed hands for 5, 10, or 20+ minutes. Tap `Right Control` again (or press `Esc`) to finish and paste!
-  - *Why Right Control?* Eliminates accidental uppercase letters caused by the Shift key, prevents OS "Sticky Keys" accessibility popups, and provides comfortable ergonomics. Easily rebindable to `shift_r`, `alt_r`, `f9`, or any custom key.
+- **🎯 Exact Verbatim Speech Fidelity (Zero Hallucination):**
+  - What you speak is exactly what is transcribed. No rewriting, no invented connecting thoughts, no awkward formal tone shifts.
+  - Automatically punctuates (।, ?, ,) and capitalizes English terms properly.
 
-- **🛡️ Hardware Audio Gate & Anti-Hallucination:**
-  - Built-in volume peak detector (`silence_threshold_db: -38.0 dB`).
-  - Discards ambient room hiss, breathing, or keyboard clicks locally *before* making any API call—saving API quota and preventing hallucinated output.
+- **🕹️ Smart Multi-Trigger (Right Alt / Right Shift / Right Ctrl):**
+  - **Hold-to-Talk (Push-to-Talk):** Hold `Right Alt` (AltGr) or `Right Shift`, speak, and release to paste immediately.
+  - **Hands-Free Toggle:** Tap `Right Alt` once (<0.35s) to lock mic ON. Speak freely with relaxed hands for 5, 10, or 20+ minutes. Tap again (or press `Esc`) to finish and paste!
+  - **Instant Visual Notification:** Prominent desktop popup appears the instant you trigger recording.
 
-- **⚡ Zero-Latency PipeWire Capture & Audio Conditioning:**
-  - Native PipeWire (`pw-record`) zero-latency stream capture with fallback to ALSA (`arecord`) and PulseAudio (`ffmpeg`).
-  - 16 kHz mono Opus/MP3 compression reduces payload size by ~90% for instant uploads.
+- **🛡️ 5ms In-Memory Silence Gate:**
+  - Instant waveform peak detector (`silence_threshold_db: -45.0 dB`).
+  - Discards room silence or background noise locally without hitting cloud quota.
 
 - **📋 Safe Native Clipboard Paste:**
   - Automatically detects Wayland (`wl-copy` / `wtype` / `ydotool`) and X11 (`xclip` / `xdotool`).
-  - Non-blocking clipboard injection with automatic timeout recovery.
 
 - **🔍 Rich Terminal Logging & Diagnostics:**
   - Real-time colored terminal logs with precise millisecond latency breakdowns (`ASR`, `NLP`, `Comp`).
