@@ -6,6 +6,7 @@ Uses official gemini-api CLI (with direct API fallback).
 """
 
 import os
+import re
 import sys
 import time
 import json
@@ -150,14 +151,67 @@ def find_gemini_cli():
     """Locate the gemini-api CLI binary."""
     candidates = [
         shutil.which("gemini-api"),
-        "/usr/local/bin/gemini-api",
         os.path.expanduser("~/.local/bin/gemini-api"),
+        "/usr/local/bin/gemini-api",
         "/usr/bin/gemini-api"
     ]
     for c in candidates:
         if c and os.path.exists(c) and os.access(c, os.X_OK):
             return c
     return None
+
+def extract_text_from_cli_response(raw_output):
+    """
+    Extracts the clean model_output text from gemini-api CLI.
+    Filters out metadata envelopes (created, id, status, usage, steps, thought signatures).
+    """
+    if not raw_output:
+        return ""
+
+    raw_str = raw_output.strip()
+
+    # 1. Try parsing JSON format (when invoked with --output-format json)
+    try:
+        data = json.loads(raw_str)
+        text_parts = []
+        for step in data.get("steps", []):
+            if step.get("type") == "model_output":
+                for item in step.get("content", []):
+                    if item.get("type") == "text":
+                        text_parts.append(item.get("text", ""))
+        if text_parts:
+            combined = "".join(text_parts).strip()
+            if combined and combined not in ("<noise>", "<silence>", "[noise]"):
+                return combined
+            return ""
+    except Exception:
+        pass
+
+    # 2. Try parsing YAML / Human-readable format (e.g. - text:  some text)
+    # Match YAML content block:
+    #   - content:
+    #       - text:  text here
+    yaml_match = re.search(r'-\s*text:\s*(.+)', raw_str)
+    if yaml_match:
+        extracted = yaml_match.group(1).strip()
+        # Remove quotes if wrapped
+        if (extracted.startswith('"') and extracted.endswith('"')) or (extracted.startswith("'") and extracted.endswith("'")):
+            extracted = extracted[1:-1].strip()
+        if extracted and extracted not in ("<noise>", "<silence>", "[noise]"):
+            return extracted
+        return ""
+
+    # 3. If single line without YAML metadata
+    lines = [line.strip() for line in raw_str.splitlines() if line.strip()]
+    cleaned_lines = []
+    skip_keys = ("created:", "id:", "model:", "service_tier:", "status:", "steps:", "usage:", "signature:", "type:", "updated:")
+    for l in lines:
+        if any(l.startswith(k) for k in skip_keys):
+            continue
+        cleaned_lines.append(l)
+
+    res = " ".join(cleaned_lines).strip()
+    return res if res not in ("<noise>", "<silence>", "[noise]") else ""
 
 class VoiceFlowDaemon:
     def __init__(self, cfg):
@@ -341,7 +395,7 @@ class VoiceFlowDaemon:
         return ""
 
     def _call_gemini_cli(self, audio_file, prompt, model, api_key):
-        """Execute gemini-api CLI binary with native performance and HTTP/2 stream."""
+        """Execute gemini-api CLI binary with native performance and JSON output."""
         env = os.environ.copy()
         if api_key:
             env["GEMINI_API_KEY"] = api_key
@@ -353,12 +407,14 @@ class VoiceFlowDaemon:
             "-i", audio_file,
             "--system", prompt,
             "-m", model,
-            "--stream=false"
+            "--stream=false",
+            "--output-format", "json"
         ]
 
         res = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=15.0)
         if res.returncode == 0:
-            return res.stdout.strip()
+            extracted = extract_text_from_cli_response(res.stdout)
+            return extracted
         else:
             err_msg = res.stderr.strip() or res.stdout.strip()
             print(f"[whisperflow] gemini-api CLI error: {err_msg[:200]}")
