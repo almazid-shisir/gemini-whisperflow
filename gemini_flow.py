@@ -1,17 +1,13 @@
 #!/usr/bin/env python3
 """
-Gemini WhisperFlow Daemon for Linux (Ultra-Fast & Smart Speech Restructuring Engine)
+Gemini WhisperFlow Daemon for Linux (High-Fidelity Audio & Anti-Hallucination Engine)
 Controls:
-  1. Hold Right Shift (shift_r): Speak while holding, release to stop & paste.
-  2. Double-Tap Right Shift (<0.45s between taps): Hands-Free Mode (locks mic ON).
+  1. Hold Right Shift (shift_r): Speak while holding, release to transcribe & paste.
+  2. Double-Tap Right Shift (<0.45s): Hands-Free Mode (locks mic ON).
      Speak freely for 5, 10, 15+ minutes without holding anything.
      Tap Right Shift (or Esc) once when done to finish and paste!
 
-High-Accuracy 2-Stage Pipeline (Audio Transcription -> Deep Fluff & Phonetic Cleaner):
-  - Stage 1: Fast audio-to-text transcription with Bengali/English context.
-  - Stage 2: Deep language cleaning (removes rambling, hesitations, repetitive phrases,
-             intelligently maps tech phonetics like 'ভার্সেল' -> 'Vercel', 'সিও' -> 'CEO').
-Robust connection pooling with auto-retry and non-blocking clipboard injection.
+Accurate PipeWire/Pulse Audio Capture + Zero-Temperature Anti-Hallucination Pipeline.
 """
 
 import os
@@ -44,42 +40,42 @@ DEFAULT_CONFIG = {
     "double_tap_interval": 0.45
 }
 
-STAGE1_AUDIO_PROMPT = """You are an accurate, fast speech-to-text transcriber specializing in Bengali, English, and Banglish.
-Transcribe the spoken audio verbatim in its original spoken language.
-Pay special attention to spoken tech terms, brands, and company names (e.g. Vercel, Google, GitHub, Python, Linux, CEO).
-Output only the transcribed words without explanations, notes, or markdown tags.
-If the audio contains only background noise, clicks, or silence, output an empty string."""
+STAGE1_AUDIO_PROMPT = """You are a highly accurate, faithful speech-to-text transcriber for Bengali, English, and Banglish.
+Your job is to transcribe the spoken audio with maximum fidelity.
 
-STAGE2_TEXT_CLEANUP_PROMPT = """You are an expert spoken-to-written language editor and thought clarifier for voice typing.
-The input is a raw spoken transcript containing hesitations, conversational fillers, self-corrections, and repetitive rambling.
+STRICT ACCURACY RULES:
+1. FAITHFUL TRANSCRIPTION:
+   - Transcribe ONLY the actual spoken words in their original language.
+   - Do NOT invent, assume, or hallucinate words, sentences, or stories that were not spoken in the audio.
+   - If the audio is unclear, transcribe phonetically what is heard.
+   - Accurately recognize spoken tech words and brands (e.g., Vercel, CEO, Python, Google, GitHub, Telegram).
+2. OUTPUT:
+   - Output only the transcribed words. No explanations, notes, or markdown formatting.
+   - If the audio contains only background noise, clicks, or silence, output an empty string."""
 
-YOUR MISSION:
-Transform the messy transcript into a clean, direct, natural, and beautifully structured message.
+STAGE2_TEXT_CLEANUP_PROMPT = """You are a strict, faithful Bengali & English text cleaner and editor for voice typing.
+The input is an exact transcript of the speaker's voice.
 
-STRICT EDITING RULES:
-1. STRIP ALL CONVERSATIONAL FILLERS & CRUTCHES:
-   - Eliminate filler phrases ruthlessly:
-     * "আমি বলতে চাইলাম", "তো এই আর কি বিষয়", "মানে", "কেমন জানি", "বুঝছ?", "মানে কি আর বলি?", "তো এই", "আর কি", "আসলে", "এই ধরেন", "উম", "যাই হোক", "তো এই হচ্ছে বিষয়", "এখন আর কি বলি?", "এই বলতে চাইলাম আর কি", "এত ইয়া হইলো", "uh", "um", "er", "like", "you know", "basically".
-2. RESOLVE PHONETIC TECH TERMS & PROPER NOUNS:
-   - Accurately recognize spoken brand, platform, and tech terminology:
-     * "ভার্সেল" / "ভার্সেলের" -> "Vercel" / "Vercel-এর" (NOT "ভারত")
-     * "সিও" / "সিইও" -> "CEO"
-     * "ইউটিউব" -> "YouTube"
-     * "টেলিগ্রাম" -> "Telegram"
-     * "গিটহাব" -> "GitHub"
-     * "পাইথন" -> "Python"
-     * "লিনাক্স" -> "Linux"
-     * "এইচডি" -> "HD", "৪কে" -> "4K", "এমবি" -> "MB", "জিবি" -> "GB"
-3. ELIMINATE REPETITION & STRUCTURE THOUGHTS:
-   - If the speaker repeats the same idea or question multiple times, merge them into ONE crisp, well-formed sentence.
-   - Punctuate cleanly with দাঁড়ি (।), কমা (,), and প্রশ্নবোধক চিহ্ন (?).
-4. PRESERVE INTENT & SPEAKER PERSPECTIVE:
-   - Maintain the speaker's own perspective (আমি, আমার, তুমি, ভাইয়া).
-   - Keep all factual details, names, questions, and emotion intact.
-   - Do NOT converse with the speaker or add unrelated thoughts.
+CRITICAL RULES:
+1. STRICT ANTI-HALLUCINATION:
+   - NEVER add new facts, imaginary storylines, or ideas that the speaker did not mention.
+   - Preserve 100% of the speaker's original meaning, questions, and perspective (আমি, আমার, তুমি, ভাইয়া).
+   - Do NOT answer, reply to, or converse with the speaker.
+2. CLEAN FLUFF ONLY:
+   - Remove meaningless verbal crutches and fillers:
+     * "আমি বলতে চাইলাম", "তো এই আর কি বিষয়", "মানে", "কেমন জানি", "বুঝছ?", "মানে কি আর বলি?", "তো এই", "আর কি", "আসলে", "যাই হোক", "তো এই হচ্ছে বিষয়", "এখন আর কি বলি?", "এই বলতে চাইলাম আর কি", "এত ইয়া হইলো", "uh", "um", "er", "like", "you know", "basically".
+   - Fix stuttering and repetitive duplicate phrases mid-sentence.
+3. PHONETIC TECH ACCURACY:
+   - "ভার্সেল" / "ভার্সেলের" -> "Vercel" / "Vercel-এর"
+   - "সিও" / "সিইও" -> "CEO"
+   - "গিটহাব" -> "GitHub"
+   - "ইউটিউব" -> "YouTube"
+   - "পাইথন" -> "Python"
+4. PUNCTUATION:
+   - Add natural punctuation (,, ।, ?, !).
 
 OUTPUT RULE:
-- Output ONLY the final cleaned, structured text. Absolutely no preamble, markdown code blocks, or notes."""
+- Output ONLY the cleaned text of what the speaker said. No preamble, notes, or markdown wrappers."""
 
 def load_config():
     os.makedirs(CONFIG_DIR, exist_ok=True)
@@ -231,7 +227,6 @@ class VoiceFlowDaemon:
         threading.Thread(target=_notify, daemon=True).start()
 
     def on_press(self, key):
-        # Allow Esc key to exit locked recording mode at any time
         if key == keyboard.Key.esc and self.is_locked_recording:
             with self.lock:
                 if self.is_locked_recording:
@@ -245,7 +240,6 @@ class VoiceFlowDaemon:
 
         now = time.time()
         with self.lock:
-            # If in Locked Hands-Free mode, a single tap stops and finishes recording!
             if self.is_locked_recording:
                 self.is_locked_recording = False
                 hold_duration = now - self.press_start_time
@@ -256,10 +250,9 @@ class VoiceFlowDaemon:
                 return
             self.key_is_down = True
 
-            # Double-Tap Detection: if tapped again within double_tap_interval, lock hands-free mode!
             if now - self.last_release_time < self.double_tap_interval:
                 self.is_locked_recording = True
-                print("[whisperflow] 🔒 HANDS-FREE LOCKED ON! Speak freely without holding keys. Tap Shift or Esc to finish.")
+                print("[whisperflow] 🔒 HANDS-FREE LOCKED ON! Speak freely. Tap Shift or Esc to finish.")
                 self.show_notification("Hands-Free Mode Active", "Microphone locked ON. Speak as long as you want. Tap Shift or Esc to finish.")
                 self.play_sound("bell")
                 return
@@ -285,34 +278,60 @@ class VoiceFlowDaemon:
             self._stop_recording_locked(hold_duration)
 
     def _spawn_recorder(self, output_path):
-        """Zero-latency audio capture using arecord or pipewire."""
-        if shutil.which("arecord"):
-            return subprocess.Popen([
-                "arecord",
-                "-f", "cd",
-                "-t", "wav",
-                "-r", "16000",
-                "-c", "1",
-                "-q",
-                output_path
-            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        """
+        High-fidelity audio recording.
+        Prefers pw-record (native PipeWire with crystal-clear 16kHz capture)
+        with fallback to ffmpeg pulse or arecord.
+        """
+        env = os.environ.copy()
+        if "XDG_RUNTIME_DIR" not in env:
+            uid = os.getuid()
+            user_runtime = f"/run/user/{uid}"
+            if os.path.exists(user_runtime):
+                env["XDG_RUNTIME_DIR"] = user_runtime
 
+        # 1. Native PipeWire recorder (Highest fidelity, exact system default mic)
         if shutil.which("pw-record"):
-            return subprocess.Popen([
-                "pw-record",
-                "--rate", "16000",
-                "--channels", "1",
-                output_path
-            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            try:
+                p = subprocess.Popen([
+                    "pw-record",
+                    "--rate", "16000",
+                    "--channels", "1",
+                    output_path
+                ], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                return p
+            except Exception:
+                pass
 
+        # 2. FFmpeg pulse audio capture (direct connection to active PulseAudio/PipeWire sink)
         if shutil.which("ffmpeg"):
-            return subprocess.Popen([
-                "ffmpeg",
-                "-y", "-v", "quiet",
-                "-f", "pulse", "-i", "default",
-                "-ar", "16000", "-ac", "1",
-                output_path
-            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            try:
+                p = subprocess.Popen([
+                    "ffmpeg",
+                    "-y", "-v", "quiet",
+                    "-f", "pulse", "-i", "default",
+                    "-ar", "16000", "-ac", "1",
+                    output_path
+                ], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                return p
+            except Exception:
+                pass
+
+        # 3. ALSA arecord fallback
+        if shutil.which("arecord"):
+            try:
+                p = subprocess.Popen([
+                    "arecord",
+                    "-f", "cd",
+                    "-t", "wav",
+                    "-r", "16000",
+                    "-c", "1",
+                    "-q",
+                    output_path
+                ], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                return p
+            except Exception:
+                pass
 
         return None
 
@@ -327,7 +346,7 @@ class VoiceFlowDaemon:
 
         if not self.record_proc:
             print("[whisperflow] ERROR: No audio recorder found.")
-            self.show_notification("Audio Error", "No recorder installed (arecord/pw-record).")
+            self.show_notification("Audio Error", "No recorder installed.")
             self.is_recording = False
             return
 
@@ -365,7 +384,6 @@ class VoiceFlowDaemon:
         threading.Thread(target=self._process_and_paste, args=(wav_file, hold_duration), daemon=True).start()
 
     def _resolve_api_key(self):
-        """Retrieve Gemini API key."""
         key = os.environ.get("GEMINI_API_KEY", "").strip()
         if key and key != "YOUR_GEMINI_API_KEY_HERE":
             return key
@@ -389,8 +407,7 @@ class VoiceFlowDaemon:
 
     def _transcribe_audio_stage1(self, audio_file, mime_type, model, api_key, duration_sec):
         """
-        Stage 1: Fast, robust audio-to-text transcription.
-        Handles disconnects with retry.
+        Stage 1: High-accuracy audio transcription (Temperature 0.0 for zero hallucination).
         """
         with open(audio_file, "rb") as f:
             audio_b64 = base64.b64encode(f.read()).decode("utf-8")
@@ -406,7 +423,6 @@ class VoiceFlowDaemon:
         try:
             resp = self.session.post(url, json=payload, timeout=api_timeout)
         except Exception:
-            # Recreate session on disconnect and retry once
             self.session = create_robust_session()
             resp = self.session.post(url, json=payload, timeout=api_timeout)
 
@@ -423,16 +439,14 @@ class VoiceFlowDaemon:
 
     def _clean_text_stage2(self, raw_transcript, model, api_key):
         """
-        Stage 2: Deep full-text language cleanup & restructuring.
-        Operates on full transcribed text, eliminates fillers, hesitations, repetitive rambles,
-        and accurately maps colloquial/phonetic terms ('ভার্সেল' -> 'Vercel', 'সিও' -> 'CEO').
+        Stage 2: Strict Fluff Removal & Tech Phonetic Alignment (Temperature 0.0).
         """
         prompt = get_cleanup_prompt()
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
         payload = {
             "system_instruction": {"parts": [{"text": prompt}]},
             "contents": [{"parts": [{"text": raw_transcript}]}],
-            "generationConfig": {"temperature": 0.1, "maxOutputTokens": 16384}
+            "generationConfig": {"temperature": 0.0, "maxOutputTokens": 16384}
         }
 
         try:
@@ -496,8 +510,8 @@ class VoiceFlowDaemon:
             elapsed = round(time.time() - t0, 2)
             file_kb = round(os.path.getsize(audio_file) / 1024, 1)
             print(f"[whisperflow] 🚀 Done in {elapsed}s (aud: {t_stage1:.2f}s, clean: {t_stage2:.2f}s, comp: {t_compress:.2f}s, {file_kb}KB):")
-            print(f'              Raw   : "{raw_text[:70]}..."')
-            print(f'              Clean : "{final_text[:70]}..."')
+            print(f'              Raw   : "{raw_text}"')
+            print(f'              Clean : "{final_text}"')
 
             self.play_sound("complete")
             self._paste_text(final_text)
@@ -520,8 +534,6 @@ class VoiceFlowDaemon:
     def _paste_text(self, text):
         """
         Safe non-blocking clipboard injection and paste.
-        Uses -quiet and proper termination to prevent lingering xclip processes.
-        Supports Wayland (wl-copy + wtype) and X11 (xclip + xdotool).
         """
         env = os.environ.copy()
         env["DISPLAY"] = env.get("DISPLAY", ":0")
@@ -573,7 +585,7 @@ def main():
     print("=" * 68)
     print("🚀 Gemini WhisperFlow (Hold Right Shift | Double-Tap to Lock ON)")
     print(f"Trigger : [Hold {trigger.replace('_', ' ').title()}] OR [Double-Tap to Lock]")
-    print(f"Engine  : Two-Stage Deep Fluff Cleaner (Unlimited Capacity)")
+    print(f"Engine  : High-Fidelity PipeWire Capture + Anti-Hallucination Pipeline")
     print(f"Model   : {config.get('model', 'gemini-3.5-flash-lite')}")
     print(f"Mode    : {'Clean Dictation' if config.get('clean_transcript', True) else 'Verbatim'}")
     print(f"Config  : {CONFIG_PATH}")
