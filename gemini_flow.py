@@ -50,7 +50,7 @@ DEFAULT_CONFIG = {
     "sound_feedback": False,
     "notify": True,
     "min_hold_seconds": 0.35,
-    "silence_threshold_db": -38.0
+    "silence_threshold_db": -45.0
 }
 
 STAGE2_TEXT_CLEANUP_PROMPT = """You are an expert spoken-to-written language editor and thought clarifier for voice typing.
@@ -263,7 +263,7 @@ def is_matching_key(key, target_str):
 # ==============================================================================
 # Audio Processing & Anti-Hallucination Gate
 # ==============================================================================
-def is_audio_silent(wav_path, threshold_db=-38.0):
+def is_audio_silent(wav_path, threshold_db=-45.0):
     """
     Hardware Silence & Noise Floor Gate.
     Analyzes peak volume in dB. If peak volume is below threshold_db,
@@ -295,9 +295,9 @@ def is_audio_silent(wav_path, threshold_db=-38.0):
 
 def compress_audio_fast(wav_path):
     """
-    Applies audio conditioning (bandpass + speech frequency cleaning)
+    Applies audio conditioning (bandpass + speech frequency cleaning + gentle boost)
     and compresses to 48k mono MP3 via ffmpeg.
-    Cuts payload size and strips background hiss.
+    Cuts payload size while preserving clear human speech.
     """
     if not shutil.which("ffmpeg"):
         return wav_path, "audio/wav"
@@ -312,7 +312,7 @@ def compress_audio_fast(wav_path):
     cmd = [
         "ffmpeg", "-y", "-v", "quiet",
         "-i", wav_path,
-        "-af", "highpass=f=120,lowpass=f=7500,afftdn=nf=-25",
+        "-af", "highpass=f=80,lowpass=f=8000,volume=1.5",
         "-ac", "1",
         "-ar", "16000",
         "-b:a", "48k",
@@ -847,16 +847,22 @@ class VoiceFlowDaemon:
         if resp.status_code != 200:
             err_body = resp.text[:300]
             Logger.error(f"Stage 1 Transcribe Failed (HTTP {resp.status_code})", err_body)
-            # Fallback to flash-lite if transcribe model encounters temporary error
+            # Fallback to flash-lite if transcribe model encounters error
             Logger.info("Attempting automatic fallback to Stage 1 Flash-Lite...")
             return self._transcribe_fallback_flash_lite(audio_b64, mime_type, api_key, api_timeout)
 
         candidates = resp.json().get("candidates", [])
         if not candidates:
-            return ""
+            Logger.info("Stage 1 candidates empty. Falling back to Flash-Lite...")
+            return self._transcribe_fallback_flash_lite(audio_b64, mime_type, api_key, api_timeout)
 
         parts = candidates[0].get("content", {}).get("parts", [])
-        return parts[0].get("text", "").strip() if parts else ""
+        transcribed_text = parts[0].get("text", "").strip() if parts else ""
+        if not transcribed_text:
+            Logger.info("Stage 1 text empty. Falling back to Flash-Lite...")
+            return self._transcribe_fallback_flash_lite(audio_b64, mime_type, api_key, api_timeout)
+
+        return transcribed_text
 
     def _transcribe_fallback_flash_lite(self, audio_b64, mime_type, api_key, api_timeout):
         """Fallback to flash-lite only if specialized transcribe model fails."""
