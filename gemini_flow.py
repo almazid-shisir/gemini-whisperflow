@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """
-Gemini WhisperFlow Daemon for Linux (Ultra-Fast & Robust Engine)
-System-wide push-to-toggle speech-to-text dictation client.
-Transcribes spoken audio using the Gemini API CLI (or direct API fallback)
-and instantly types/pastes output at active cursor position.
+Gemini WhisperFlow Daemon for Linux (Ultra-Fast & Clean Push-to-Talk Engine)
+Hold Right Shift (shift_r) to speak, release to transcribe and paste.
+Uses official gemini-api CLI (with direct API fallback).
 """
 
 import os
@@ -26,10 +25,11 @@ CUSTOM_PROMPT_PATH = os.path.join(CONFIG_DIR, "prompt.txt")
 DEFAULT_CONFIG = {
     "gemini_api_key": "",
     "model": "gemini-3.5-flash-lite",
-    "trigger_key": "caps_lock",
+    "trigger_key": "shift_r",
     "clean_transcript": True,
     "sound_feedback": False,
-    "notify": True
+    "notify": True,
+    "min_hold_seconds": 0.35
 }
 
 CLEANUP_SYSTEM_PROMPT = """You are an expert speech-to-text transcript cleanup engine for an instant voice typing application.
@@ -103,7 +103,7 @@ def get_system_prompt(cfg):
 
 def compress_audio_fast(wav_path):
     """
-    Compresses raw PCM WAV to 16kHz mono MP3 via ffmpeg if available.
+    Quickly compresses raw PCM WAV to 16kHz mono MP3 via ffmpeg if available.
     If ffmpeg is missing, returns the original WAV file immediately.
     """
     if not shutil.which("ffmpeg"):
@@ -127,17 +127,27 @@ def compress_audio_fast(wav_path):
 
     return wav_path, "audio/wav"
 
-def resolve_target_key(key_str):
-    name = key_str.lower().strip().replace("-", "_").replace(" ", "_")
-    if hasattr(keyboard.Key, name):
-        return getattr(keyboard.Key, name)
-    try:
-        return keyboard.KeyCode.from_char(name)
-    except Exception:
-        return keyboard.Key.caps_lock
+def is_matching_key(key, target_str):
+    """Check if the pressed key matches the configured target key."""
+    s = target_str.lower().strip().replace("-", "_").replace(" ", "_")
+    if s in ("shift_r", "right_shift", "rshift"):
+        return key == keyboard.Key.shift_r
+    elif s in ("shift_l", "left_shift", "lshift"):
+        return key == keyboard.Key.shift_l or key == keyboard.Key.shift
+    elif s in ("shift",):
+        return key in (keyboard.Key.shift, keyboard.Key.shift_r, keyboard.Key.shift_l)
+    elif s in ("caps_lock", "capslock"):
+        return key == keyboard.Key.caps_lock
+    else:
+        if hasattr(keyboard.Key, s):
+            return key == getattr(keyboard.Key, s)
+        try:
+            return getattr(key, 'char', None) == s
+        except Exception:
+            return False
 
 def find_gemini_cli():
-    """Locate the gemini-api CLI binary if installed."""
+    """Locate the gemini-api CLI binary."""
     candidates = [
         shutil.which("gemini-api"),
         "/usr/local/bin/gemini-api",
@@ -155,35 +165,17 @@ class VoiceFlowDaemon:
         self.is_recording = False
         self.record_proc = None
         self.current_wav = None
-        self.last_toggle_time = 0
-        self.suppress_hotkey = False
+        self.press_start_time = 0
+        self.key_is_down = False
         self.lock = threading.Lock()
-        self.target_key = resolve_target_key(cfg.get("trigger_key", "caps_lock"))
+        self.trigger_key_str = cfg.get("trigger_key", "shift_r")
+        self.min_hold_seconds = float(cfg.get("min_hold_seconds", 0.35))
         self.cli_binary = find_gemini_cli()
 
         if self.cli_binary:
             print(f"[whisperflow] Fast Gemini CLI Engine detected: {self.cli_binary}")
         else:
             print("[whisperflow] Gemini CLI not found. Falling back to direct API engine.")
-
-    def ensure_caps_off(self):
-        """Turn off Caps Lock if left on, with hotkey suppression to prevent self-triggering."""
-        if self.cfg.get("trigger_key", "").lower() != "caps_lock":
-            return
-        if not shutil.which("xset") or not shutil.which("xdotool"):
-            return
-        try:
-            env = os.environ.copy()
-            env["DISPLAY"] = env.get("DISPLAY", ":0")
-            res = subprocess.run(["xset", "q"], env=env, capture_output=True, text=True, timeout=0.5)
-            if "Caps Lock:   on" in res.stdout:
-                self.suppress_hotkey = True
-                try:
-                    subprocess.run(["xdotool", "key", "Caps_Lock"], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.5)
-                finally:
-                    self.suppress_hotkey = False
-        except Exception:
-            self.suppress_hotkey = False
 
     def play_sound(self, sound_name):
         if not self.cfg.get("sound_feedback", False):
@@ -217,30 +209,30 @@ class VoiceFlowDaemon:
                 pass
         threading.Thread(target=_notify, daemon=True).start()
 
-    def on_key_press(self, key):
-        if self.suppress_hotkey:
-            return
-        if key == self.target_key:
-            self.toggle()
-
-    def toggle(self):
-        if self.suppress_hotkey:
+    def on_press(self, key):
+        if not is_matching_key(key, self.trigger_key_str):
             return
 
-        now = time.time()
-        # Debounce rapid accidental double clicks within 0.28s
-        if now - self.last_toggle_time < 0.28:
-            return
-        self.last_toggle_time = now
+        with self.lock:
+            if self.key_is_down:
+                return
+            self.key_is_down = True
+            self.press_start_time = time.time()
+            self._start_recording_locked()
 
-        if not self.is_recording:
-            self.start_recording()
-        else:
-            self.stop_and_transcribe()
+    def on_release(self, key):
+        if not is_matching_key(key, self.trigger_key_str):
+            return
+
+        with self.lock:
+            if not self.key_is_down:
+                return
+            self.key_is_down = False
+            hold_duration = time.time() - self.press_start_time
+            self._stop_recording_locked(hold_duration)
 
     def _spawn_recorder(self, output_path):
-        """Spawn the fastest available audio recording process with minimal latency."""
-        # 1. arecord (ALSA - zero overhead)
+        """Spawn the fastest available audio recorder with minimal overhead."""
         if shutil.which("arecord"):
             return subprocess.Popen([
                 "arecord",
@@ -252,7 +244,6 @@ class VoiceFlowDaemon:
                 output_path
             ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-        # 2. pw-record (PipeWire native)
         if shutil.which("pw-record"):
             return subprocess.Popen([
                 "pw-record",
@@ -261,7 +252,6 @@ class VoiceFlowDaemon:
                 output_path
             ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-        # 3. sox / rec
         if shutil.which("rec"):
             return subprocess.Popen([
                 "rec",
@@ -271,7 +261,6 @@ class VoiceFlowDaemon:
                 output_path
             ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-        # 4. ffmpeg fallback
         if shutil.which("ffmpeg"):
             return subprocess.Popen([
                 "ffmpeg",
@@ -283,45 +272,48 @@ class VoiceFlowDaemon:
 
         return None
 
-    def start_recording(self):
-        with self.lock:
-            if self.is_recording:
-                return
-            self.is_recording = True
+    def _start_recording_locked(self):
+        if self.is_recording:
+            return
+        self.is_recording = True
 
-            session_id = uuid.uuid4().hex[:8]
-            self.current_wav = os.path.join(tempfile.gettempdir(), f"gwf_{os.getpid()}_{session_id}.wav")
-            self.record_proc = self._spawn_recorder(self.current_wav)
+        session_id = uuid.uuid4().hex[:8]
+        self.current_wav = os.path.join(tempfile.gettempdir(), f"gwf_{os.getpid()}_{session_id}.wav")
+        self.record_proc = self._spawn_recorder(self.current_wav)
 
-            if not self.record_proc:
-                print("[whisperflow] ERROR: No audio recorder found (install alsa-utils or pipewire).")
-                self.show_notification("Audio Error", "No audio recorder installed (arecord/pw-record).")
-                self.is_recording = False
-                return
-
-        trigger_name = self.cfg.get("trigger_key", "caps_lock").replace("_", " ").title()
-        print(f"[whisperflow] 🔴 Recording started ({trigger_name} to finish)...")
-        self.play_sound("bell")
-        self.show_notification("Recording...", f"Speak now. Press {trigger_name} when done.")
-
-    def stop_and_transcribe(self):
-        with self.lock:
-            if not self.is_recording:
-                return
+        if not self.record_proc:
+            print("[whisperflow] ERROR: No audio recorder found (install alsa-utils or pipewire).")
+            self.show_notification("Audio Error", "No audio recorder installed (arecord/pw-record).")
             self.is_recording = False
-            proc = self.record_proc
-            wav_file = self.current_wav
-            self.record_proc = None
-            self.current_wav = None
+            return
+
+        key_label = self.trigger_key_str.replace("_", " ").title()
+        print(f"[whisperflow] 🔴 Hold [{key_label}] active: Listening...")
+        self.play_sound("bell")
+
+    def _stop_recording_locked(self, hold_duration):
+        if not self.is_recording:
+            return
+        self.is_recording = False
+
+        proc = self.record_proc
+        wav_file = self.current_wav
+        self.record_proc = None
+        self.current_wav = None
 
         if proc:
             proc.terminate()
             try:
-                proc.wait(timeout=0.8)
+                proc.wait(timeout=0.6)
             except subprocess.TimeoutExpired:
                 proc.kill()
 
-        print("[whisperflow] ⚡ Processing audio...")
+        # If it was an accidental quick tap, discard recording
+        if hold_duration < self.min_hold_seconds:
+            self._cleanup_files(wav_file)
+            return
+
+        print(f"[whisperflow] ⚡ Released (held {hold_duration:.2f}s). Transcribing...")
         self.show_notification("Processing...", "Transcribing speech...")
         threading.Thread(target=self._process_and_paste, args=(wav_file,), daemon=True).start()
 
@@ -335,7 +327,6 @@ class VoiceFlowDaemon:
         if cfg_key and cfg_key != "YOUR_GEMINI_API_KEY_HERE":
             return cfg_key
 
-        # Check gemini-api CLI config if available (~/.config/gemini-api/config.json)
         cli_conf = os.path.expanduser("~/.config/gemini-api/config.json")
         if os.path.exists(cli_conf):
             try:
@@ -370,7 +361,7 @@ class VoiceFlowDaemon:
             return res.stdout.strip()
         else:
             err_msg = res.stderr.strip() or res.stdout.strip()
-            print(f"[whisperflow] gemini-api CLI failed (code {res.returncode}): {err_msg[:200]}")
+            print(f"[whisperflow] gemini-api CLI error: {err_msg[:200]}")
             return None
 
     def _call_direct_api(self, audio_file, mime_type, prompt, model, api_key):
@@ -407,9 +398,7 @@ class VoiceFlowDaemon:
 
         if not wav_path or not os.path.exists(wav_path) or os.path.getsize(wav_path) < 2500:
             print("[whisperflow] Audio input too short or silent.")
-            self.show_notification("Notice", "Audio sample too short.")
             self._cleanup_files(wav_path)
-            self.ensure_caps_off()
             return
 
         audio_file = wav_path
@@ -430,15 +419,15 @@ class VoiceFlowDaemon:
             text = None
             t_api0 = time.time()
 
-            # Priority 1: Gemini API CLI (Ultra-fast, native Go runtime)
+            # Priority 1: Gemini API CLI (Ultra-fast Go binary)
             if self.cli_binary:
                 try:
                     text = self._call_gemini_cli(audio_file, prompt, model, api_key)
                 except Exception as ex:
-                    print(f"[whisperflow] CLI execution warning: {ex}. Falling back to direct API.")
+                    print(f"[whisperflow] CLI warning: {ex}. Falling back to direct API.")
                     text = None
 
-            # Priority 2: Direct HTTPS API fallback if CLI returned None
+            # Priority 2: Direct HTTPS API fallback
             if text is None:
                 text = self._call_direct_api(audio_file, mime_type, prompt, model, api_key)
 
@@ -446,7 +435,7 @@ class VoiceFlowDaemon:
             elapsed = round(time.time() - t0, 2)
 
             if not text:
-                print(f"[whisperflow] No text detected or empty transcription ({elapsed}s).")
+                print(f"[whisperflow] No speech recognized ({elapsed}s).")
                 self.show_notification("Notice", "No speech detected.")
                 return
 
@@ -462,7 +451,6 @@ class VoiceFlowDaemon:
             self.show_notification("Error", str(e))
         finally:
             self._cleanup_files(wav_path, audio_file)
-            self.ensure_caps_off()
 
     def _cleanup_files(self, *paths):
         for p in paths:
@@ -474,14 +462,13 @@ class VoiceFlowDaemon:
 
     def _paste_text(self, text):
         """
-        Ultra-fast clipboard injection and keyboard paste.
-        Supports both Wayland (wl-copy + wtype/ydotool) and X11 (xclip + xdotool).
+        Ultra-fast clipboard injection and paste.
+        Supports Wayland (wl-copy + wtype) and X11 (xclip + xdotool).
         """
         env = os.environ.copy()
         env["DISPLAY"] = env.get("DISPLAY", ":0")
         raw_bytes = text.encode("utf-8")
 
-        # 1. Wayland Clipboard Support
         is_wayland = bool(os.environ.get("WAYLAND_DISPLAY"))
         if is_wayland and shutil.which("wl-copy"):
             try:
@@ -489,7 +476,6 @@ class VoiceFlowDaemon:
                 p.communicate(input=raw_bytes, timeout=0.5)
             except Exception:
                 pass
-        # 2. X11 Clipboard Support
         elif shutil.which("xclip"):
             try:
                 p = subprocess.Popen(["xclip", "-selection", "clipboard"], stdin=subprocess.PIPE, env=env)
@@ -502,8 +488,7 @@ class VoiceFlowDaemon:
             except Exception:
                 pass
 
-        # Perform paste simulation
-        time.sleep(0.04)
+        time.sleep(0.03)
         if shutil.which("xdotool"):
             try:
                 subprocess.run(
@@ -529,18 +514,18 @@ class VoiceFlowDaemon:
 def main():
     config = load_config()
     daemon = VoiceFlowDaemon(config)
-    trigger = config.get("trigger_key", "caps_lock").lower()
+    trigger = config.get("trigger_key", "shift_r")
 
-    print("=" * 60)
-    print("🚀 Gemini WhisperFlow Daemon (Ultra-Fast Linux STT)")
-    print(f"Trigger : [{trigger.replace('_', ' ').title()}]")
+    print("=" * 65)
+    print("🚀 Gemini WhisperFlow (Hold to Speak - Release to Paste)")
+    print(f"Trigger : [Hold {trigger.replace('_', ' ').title()}]")
     print(f"Engine  : {'gemini-api CLI (Native Go)' if daemon.cli_binary else 'Direct API (Python fallback)'}")
     print(f"Model   : {config.get('model', 'gemini-3.5-flash-lite')}")
     print(f"Mode    : {'Clean Dictation' if config.get('clean_transcript', True) else 'Verbatim'}")
     print(f"Config  : {CONFIG_PATH}")
-    print("=" * 60 + "\n")
+    print("=" * 65 + "\n")
 
-    with keyboard.Listener(on_press=daemon.on_key_press) as listener:
+    with keyboard.Listener(on_press=daemon.on_press, on_release=daemon.on_release) as listener:
         try:
             listener.join()
         except KeyboardInterrupt:
