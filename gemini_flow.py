@@ -57,21 +57,35 @@ DEFAULT_CONFIG = {
     "silence_threshold_db": -45.0
 }
 
-SINGLE_PASS_DICTATION_PROMPT = """You are an ultra-accurate speech-to-text dictation engine specializing in bilingual Bengali, English, and Banglish code-switching.
-Transcribe the spoken audio verbatim in its original spoken language with natural punctuation and proper capitalization.
+SINGLE_PASS_DICTATION_PROMPT = """You are an expert spoken-to-written clean dictation engine specializing in bilingual Bengali, English, and Banglish code-switching.
+Listen to the user's spoken audio and produce a clean, fluent, properly punctuated written text.
 
-CRITICAL ZERO-HALLUCINATION RULES:
-1. VERBATIM FIDELITY: Transcribe the exact words spoken by the speaker. Do NOT summarize, rephrase, rewrite, or embellish. Do NOT change colloquial Bengali words into formal words (e.g. keep "আসতাছি", "করছি", "বলছি" exactly as spoken).
-2. PUNCTUATION & CAPITALIZATION: Add natural punctuation (।, ?, ,) and proper capitalization for English words and technical acronyms.
-3. TECH TERMINOLOGY: Accurately recognize spoken brand, platform, and tech terminology:
-   - "Vercel", "GitHub", "Python", "Linux", "CEO", "API", "YouTube", "Telegram", "Docker", "Next.js", "AI", "Cloudflare", "HTTP", "HD", "4K", "MB", "GB".
-4. MINOR STUTTERS: Only merge immediate accidental stutter repetitions (e.g. "আমি... আমি বলছি" -> "আমি বলছি"). Do NOT delete the speaker's thoughts, questions, or vocabulary.
-5. ANTI-HALLUCINATION GUARD:
-   - Only transcribe words distinctly and audibly spoken.
-   - If the audio contains only ambient silence, keyboard taps, breathing, or background noise, you MUST output an empty string "".
-   - NEVER invent words, guess, or converse with the user.
+CRITICAL CLEAN DICTATION RULES:
+1. STRIP VERBAL FILLERS & HESITATIONS:
+   Remove spoken filler crutches and hesitation clutter ruthlessly:
+   - Bengali: "মানে", "ইয়ে", "ইয়ে যেটা আছে", "আসলে", "তো এই আর কি", "তো এই", "আর কি", "উম", "আহ", "যাই হোক"
+   - English: "um", "uh", "er", "like", "you know", "basically", "so yeah"
 
-Output ONLY the final transcribed text without preamble, notes, or markdown tags."""
+2. SMOOTH FALSE STARTS & STUTTERS:
+   - When the speaker stumbles, restarts a phrase, or repeats words accidentally, keep only the intended final phrasing.
+     (e.g., "এইটা এটার আউটপুট দেখো" -> "এটার আউটপুট দেখো", "আমি... আমি চাচ্ছি" -> "আমি চাচ্ছি")
+
+3. PHONETIC TECH & ENGLISH ACCURACY:
+   Accurately recognize spoken brand, platform, and tech terminology:
+   - "Latency" / "ল্যাটেন্সি" (CRITICAL: never mishear as "লাইটনিং সে"!)
+   - "FastAPI", "Flash API", "Gemini", "API", "GitHub", "Vercel", "CEO", "Python", "Linux", "Telegram", "YouTube", "Docker", "Prompt", "Output", "Code", "Push", "Commit", "Repo", "Debug", "Fix"
+
+4. PRESERVE SPEAKER'S NATURAL TONE (NO STIFF LANGUAGE):
+   - Keep the speaker's colloquial Bengali forms natural and authentic (e.g., "করছি", "বলছি", "হচ্ছে", "দেখতেছো", "নামে না", "আসতাছি").
+   - NEVER convert colloquial Bengali into 19th-century formal Sadhu or textbook Bengali ("করিতেছি", "বলিতেছি").
+
+5. ABSOLUTE ZERO-HALLUCINATION GUARD:
+   - Do NOT invent new facts, thoughts, explanations, answers, or sentences.
+   - Do NOT converse with the speaker or reply to their questions.
+   - You are a clean dictation typist: transcribe what the speaker conveyed, cleaned of filler clutter, with 100% fidelity to the speaker's meaning.
+   - If the audio is silent or contains only background noise/keyboard clicks, output "".
+
+Output ONLY the final clean transcribed text without preamble, notes, or markdown tags."""
 
 # Deterministic Tech Term Normalization (Instant Regex Table)
 DETERMINISTIC_TECH_MAP = [
@@ -87,6 +101,11 @@ DETERMINISTIC_TECH_MAP = [
     (re.compile(r"\bইউটিউব\b", re.IGNORECASE), "YouTube"),
     (re.compile(r"\bডকার\b", re.IGNORECASE), "Docker"),
     (re.compile(r"\bক্লাউডফ্লেয়ার\b", re.IGNORECASE), "Cloudflare"),
+    (re.compile(r"\bলাইটনিং\s*সে\b", re.IGNORECASE), "ল্যাটেন্সি"),
+    (re.compile(r"\bফাস্ট\s*এপিআই\b", re.IGNORECASE), "FastAPI"),
+    (re.compile(r"\bফ্ল্যাশ\s*এপিআই\b", re.IGNORECASE), "Flash API"),
+    (re.compile(r"\bএপিআই\b", re.IGNORECASE), "API"),
+    (re.compile(r"\bজেমিনি\b", re.IGNORECASE), "Gemini"),
 ]
 
 def apply_deterministic_tech_normalization(text):
