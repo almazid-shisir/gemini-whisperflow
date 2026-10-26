@@ -54,7 +54,7 @@ DEFAULT_CONFIG = {
     "sound_feedback": False,
     "notify": True,
     "min_hold_seconds": 0.35,
-    "silence_threshold_db": -45.0
+    "silence_threshold_db": -48.0
 }
 
 SINGLE_PASS_DICTATION_PROMPT = """You are an expert spoken-to-written clean dictation engine specializing in bilingual Bengali, English, and Banglish code-switching.
@@ -70,10 +70,14 @@ CRITICAL CLEAN DICTATION RULES:
    - When the speaker stumbles, restarts a phrase, or repeats words accidentally, keep only the intended final phrasing.
      (e.g., "এইটা এটার আউটপুট দেখো" -> "এটার আউটপুট দেখো", "আমি... আমি চাচ্ছি" -> "আমি চাচ্ছি")
 
-3. PHONETIC TECH & ENGLISH ACCURACY:
-   Accurately recognize spoken brand, platform, and tech terminology:
-   - "Latency" / "ল্যাটেন্সি" (CRITICAL: never mishear as "লাইটনিং সে"!)
-   - "FastAPI", "Flash API", "Gemini", "API", "GitHub", "Vercel", "CEO", "Python", "Linux", "Telegram", "YouTube", "Docker", "Prompt", "Output", "Code", "Push", "Commit", "Repo", "Debug", "Fix"
+3. DEVELOPER & TECH VOCABULARY ACCURACY (CRITICAL):
+   - Bengali developers constantly mix English tech terms and developer platforms in speech.
+   - You MUST accurately recognize and preserve English tech terminology, developer tools, and platform names:
+     * "Hugging Face" (CRITICAL: NEVER translate or mishear as "হাতির ফেস" or "হাগিং ফেস"!)
+     * "Dataset" / "Datasets" (e.g. "ডাটা সেট" / "ডেটাসেট" -> "dataset")
+     * "Latency" (NEVER "লাইটনিং সে"!)
+     * "FastAPI", "Flash API", "Gemini", "API", "GitHub", "Vercel", "CEO", "Python", "Linux", "Telegram", "YouTube", "Docker", "Prompt", "Output", "Code", "Push", "Commit", "Repo", "Debug", "Fix"
+   - If audio contains acoustic noise or muffled sounds that phonetically resemble a developer tool, library, or platform (e.g. Hugging Face, GitHub, FastAPI, Dataset, API), prioritize the technical developer term over literal or humorous Bengali word translations.
 
 4. PRESERVE SPEAKER'S NATURAL TONE (NO STIFF LANGUAGE):
    - Keep the speaker's colloquial Bengali forms natural and authentic (e.g., "করছি", "বলছি", "হচ্ছে", "দেখতেছো", "নামে না", "আসতাছি").
@@ -89,6 +93,9 @@ Output ONLY the final clean transcribed text without preamble, notes, or markdow
 
 # Deterministic Tech Term Normalization (Instant Regex Table)
 DETERMINISTIC_TECH_MAP = [
+    (re.compile(r"\bহাতির\s*ফেস\b", re.IGNORECASE), "Hugging Face"),
+    (re.compile(r"\bহাগিং\s*ফেস\b", re.IGNORECASE), "Hugging Face"),
+    (re.compile(r"\bহাগিংফেস\b", re.IGNORECASE), "Hugging Face"),
     (re.compile(r"\bভার্সেল\b", re.IGNORECASE), "Vercel"),
     (re.compile(r"\bভার্সেলের\b", re.IGNORECASE), "Vercel-এর"),
     (re.compile(r"\bসিও\b", re.IGNORECASE), "CEO"),
@@ -106,6 +113,8 @@ DETERMINISTIC_TECH_MAP = [
     (re.compile(r"\bফ্ল্যাশ\s*এপিআই\b", re.IGNORECASE), "Flash API"),
     (re.compile(r"\bএপিআই\b", re.IGNORECASE), "API"),
     (re.compile(r"\bজেমিনি\b", re.IGNORECASE), "Gemini"),
+    (re.compile(r"\bডাটা\s*সেট\b", re.IGNORECASE), "dataset"),
+    (re.compile(r"\bডেটাসেট\b", re.IGNORECASE), "dataset"),
 ]
 
 def apply_deterministic_tech_normalization(text):
@@ -348,7 +357,7 @@ def compress_audio_in_memory(wav_path):
     cmd = [
         "ffmpeg", "-y", "-v", "quiet",
         "-i", wav_path,
-        "-af", "highpass=f=80,lowpass=f=8000,volume=1.5",
+        "-af", "highpass=f=100,lowpass=f=7500,speechnorm=e=4:r=0.0001:l=1",
         "-ac", "1",
         "-ar", "16000",
         "-b:a", "48k",
@@ -606,7 +615,7 @@ def run_self_test(cfg):
 
     # 3. Audio Gate & Compression Test
     Logger.info("3/3 Testing in-memory audio conditioning & volume gate...")
-    is_silent = is_audio_silent(temp_wav, cfg.get("silence_threshold_db", -45.0))
+    is_silent = is_audio_silent(temp_wav, cfg.get("silence_threshold_db", -48.0))
     Logger.info(f"Silence Gate result: {'Silent/Background Noise' if is_silent else 'Speech/Sound Present'}")
 
     mp3_bytes, mime = compress_audio_in_memory(temp_wav)
@@ -637,10 +646,10 @@ class VoiceFlowDaemon:
         self.key_is_down = False
         self.lock = threading.Lock()
 
-        self.trigger_key_str = cfg.get("trigger_key", "ctrl_r")
+        self.trigger_key_str = cfg.get("trigger_key", "smart")
         self.trigger_label = self.trigger_key_str.replace("_", " ").title()
         self.min_hold_seconds = float(cfg.get("min_hold_seconds", 0.35))
-        self.silence_threshold_db = float(cfg.get("silence_threshold_db", -38.0))
+        self.silence_threshold_db = float(cfg.get("silence_threshold_db", -48.0))
 
         self.transcribe_model = cfg.get("transcribe_model", "gemini-3.5-transcribe")
         self.cleanup_model = cfg.get("cleanup_model", "gemini-3.5-flash-lite")
