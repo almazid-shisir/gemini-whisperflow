@@ -57,39 +57,39 @@ DEFAULT_CONFIG = {
     "silence_threshold_db": -48.0
 }
 
-SINGLE_PASS_DICTATION_PROMPT = """You are an expert spoken-to-written clean dictation engine specializing in bilingual Bengali, English, and Banglish code-switching.
-Listen to the user's spoken audio and produce a clean, fluent, properly punctuated written text.
+ASR_TRANSCRIPTION_PROMPT = """You are an ultra-accurate verbatim speech-to-text engine specializing in bilingual Bengali, English, and Banglish code-switching.
+Transcribe the spoken audio verbatim in its original spoken language with 100% acoustic fidelity.
+Never summarize, never translate, and never invent text on silence."""
 
-CRITICAL CLEAN DICTATION RULES:
-1. STRIP VERBAL FILLERS & HESITATIONS:
-   Remove spoken filler crutches and hesitation clutter ruthlessly:
-   - Bengali: "মানে", "ইয়ে", "ইয়ে যেটা আছে", "আসলে", "তো এই আর কি", "তো এই", "আর কি", "উম", "আহ", "যাই হোক"
-   - English: "um", "uh", "er", "like", "you know", "basically", "so yeah"
+STAGE2_TEXT_CLEANUP_PROMPT = """You are an expert spoken-to-written language editor and thought clarifier for voice typing.
+The input is a raw spoken transcript containing hesitations, conversational fillers, self-corrections, and repetitive rambling.
 
-2. SMOOTH FALSE STARTS & STUTTERS:
-   - When the speaker stumbles, restarts a phrase, or repeats words accidentally, keep only the intended final phrasing.
-     (e.g., "এইটা এটার আউটপুট দেখো" -> "এটার আউটপুট দেখো", "আমি... আমি চাচ্ছি" -> "আমি চাচ্ছি")
+YOUR MISSION:
+Transform the raw spoken transcript into clean, direct, polished, and beautifully structured Bengali/English text.
 
+STRICT EDITING RULES:
+1. STRIP VERBAL FILLERS & HESITATION CRUTCHES:
+   - Eliminate verbal filler clutter ruthlessly:
+     "মানে", "ইয়ে", "তো এই আর কি", "আসলে", "উম", "আহ", "যাই হোক", "তো", "আর কি বলি", "তো এই বিষয়", "uh", "um", "like", "you know".
+2. FIX SPOKEN SLIPS & SMOOTH STUTTERS:
+   - Clean up accidental slips of the tongue or awkward spoken phrasings (e.g. "সো এইগুলো ক্লিন করে উপর করে দাও" -> "তাই এগুলো ক্লিন করে বাদ দিয়ে দাও", "যেন আমি টাইম এই স্ক্রিপ্ট দিয়ে" -> "যাতে যেকোনো সময় এই স্ক্রিপ্ট দিয়ে").
+   - Merge repetitive stutter restarts smoothly into crisp sentences.
 3. DEVELOPER & TECH VOCABULARY ACCURACY (CRITICAL):
-   - Bengali developers constantly mix English tech terms and developer platforms in speech.
-   - You MUST accurately recognize and preserve English tech terminology, developer tools, and platform names:
-     * "Hugging Face" (CRITICAL: NEVER translate or mishear as "হাতির ফেস" or "হাগিং ফেস"!)
-     * "Dataset" / "Datasets" (e.g. "ডাটা সেট" / "ডেটাসেট" -> "dataset")
-     * "Latency" (NEVER "লাইটনিং সে"!)
-     * "FastAPI", "Flash API", "Gemini", "API", "GitHub", "Vercel", "CEO", "Python", "Linux", "Telegram", "YouTube", "Docker", "Prompt", "Output", "Code", "Push", "Commit", "Repo", "Debug", "Fix"
-   - If audio contains acoustic noise or muffled sounds that phonetically resemble a developer tool, library, or platform (e.g. Hugging Face, GitHub, FastAPI, Dataset, API), prioritize the technical developer term over literal or humorous Bengali word translations.
-
+   - Bengali developers constantly use English tech terms and developer platforms in speech.
+   - You MUST recognize and preserve English tech terminology:
+     * "Tailscale", "IP", "Terminal", "Script", "CLI", "Hugging Face", "GitHub", "Vercel", "FastAPI", "API", "Latency", "Python", "Linux", "Docker", "Dataset", "Prompt", "Output", "Code", "Push", "Commit", "Repo", "Debug", "Fix"
+     * NEVER translate technical names into literal Bengali words (e.g. "হাতির ফেস" -> "Hugging Face").
 4. PRESERVE SPEAKER'S NATURAL TONE (NO STIFF LANGUAGE):
-   - Keep the speaker's colloquial Bengali forms natural and authentic (e.g., "করছি", "বলছি", "হচ্ছে", "দেখতেছো", "নামে না", "আসতাছি").
+   - Maintain the speaker's own voice and natural colloquial tone (আমি, আমার, তুমি, ভাইয়া, করছি, বলছি, হচ্ছে, দেখতেছো).
    - NEVER convert colloquial Bengali into 19th-century formal Sadhu or textbook Bengali ("করিতেছি", "বলিতেছি").
+   - Do NOT converse with the speaker, answer questions, or add unrelated thoughts.
+5. PUNCTUATION:
+   - Add clean punctuation (।, ?, ,).
 
-5. ABSOLUTE ZERO-HALLUCINATION GUARD:
-   - Do NOT invent new facts, thoughts, explanations, answers, or sentences.
-   - Do NOT converse with the speaker or reply to their questions.
-   - You are a clean dictation typist: transcribe what the speaker conveyed, cleaned of filler clutter, with 100% fidelity to the speaker's meaning.
-   - If the audio is silent or contains only background noise/keyboard clicks, output "".
+Output ONLY the final cleaned, structured text without preamble, markdown code fences, or notes."""
 
-Output ONLY the final clean transcribed text without preamble, notes, or markdown tags."""
+# Backward compatibility alias
+SINGLE_PASS_DICTATION_PROMPT = STAGE2_TEXT_CLEANUP_PROMPT
 
 # Deterministic Tech Term Normalization (Instant Regex Table)
 DETERMINISTIC_TECH_MAP = [
@@ -177,14 +177,16 @@ class Logger:
     @classmethod
     def banner(cls, cfg):
         trig = cfg.get("trigger_key", "smart").replace("_", " ").title()
-        model = cfg.get("cleanup_model", "gemini-3.5-flash-lite")
-        mode = "Single-Pass High-Fidelity" if cfg.get("clean_transcript", True) else "Pure Verbatim"
+        trans_model = cfg.get("transcribe_model", "gemini-3.5-transcribe")
+        clean_model = cfg.get("cleanup_model", "gemini-3.5-flash-lite")
+        mode = "Two-Stage Clean Dictation" if cfg.get("clean_transcript", True) else "Pure Verbatim"
         w = 68
         print(f"{cls.CYAN}{'═' * w}{cls.RESET}")
-        print(f"{cls.BOLD}{cls.WHITE} 🚀 Gemini WhisperFlow — Single-Pass Ultra-Fast Voice Engine{cls.RESET}")
+        print(f"{cls.BOLD}{cls.WHITE} 🚀 Gemini WhisperFlow — Two-Stage High-Precision Voice Engine{cls.RESET}")
         print(f"{cls.CYAN}{'─' * w}{cls.RESET}")
         print(f"  {cls.BOLD}Trigger Key{cls.RESET}  : [{trig}] (Hold to talk | Tap to toggle hands-free)")
-        print(f"  {cls.BOLD}Model Engine{cls.RESET} : {cls.GREEN}{model}{cls.RESET} (Ultra-Fast Zero-Hallucination)")
+        print(f"  {cls.BOLD}Stage 1 ASR{cls.RESET}  : {cls.GREEN}{trans_model}{cls.RESET} (1000% Verbatim Accuracy)")
+        print(f"  {cls.BOLD}Stage 2 NLP{cls.RESET}  : {cls.GREEN}{clean_model}{cls.RESET} (Flash Thought Clarifier & Fluff Stripper)")
         print(f"  {cls.BOLD}Output Mode{cls.RESET}  : {mode}")
         print(f"  {cls.BOLD}Config File{cls.RESET}  : {CONFIG_PATH}")
         print(f"{cls.CYAN}{'═' * w}{cls.RESET}\n", flush=True)
@@ -242,7 +244,7 @@ def get_cleanup_prompt():
                     return c
         except Exception:
             pass
-    return SINGLE_PASS_DICTATION_PROMPT
+    return STAGE2_TEXT_CLEANUP_PROMPT
 
 
 def is_matching_key(key, target_str):
@@ -865,49 +867,14 @@ class VoiceFlowDaemon:
 
         return ""
 
-    def _transcribe_single_pass(self, audio_b64, mime_type, api_key, duration_sec):
+    def _transcribe_audio_stage1(self, audio_bytes, mime_type, api_key, duration_sec):
         """
-        Ultra-Fast Single-Pass Dictation Engine (gemini-3.5-flash-lite).
-        Transcribes speech verbatim with natural punctuation and proper tech terms in ONE hop.
-        Latency: ~1.1s - 1.4s. Zero hallucination.
+        Stage 1: Accurate Verbatim ASR Transcription (gemini-3.5-transcribe).
+        Transcribes speech verbatim in original language with 1000% acoustic fidelity.
+        Falls back to Flash-Lite ASR if transcribe endpoint returns an error.
         """
-        prompt = get_cleanup_prompt()
-        api_timeout = max(10.0, min(120.0, 10.0 + (duration_sec * 0.12)))
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.cleanup_model}:generateContent?key={api_key}"
-        payload = {
-            "system_instruction": {"parts": [{"text": prompt}]},
-            "contents": [{
-                "parts": [
-                    {"inline_data": {"mime_type": mime_type, "data": audio_b64}}
-                ]
-            }],
-            "generationConfig": {"temperature": 0.0, "maxOutputTokens": 4096}
-        }
-
-        try:
-            resp = self.session.post(url, json=payload, timeout=api_timeout)
-        except Exception as e:
-            Logger.warn(f"Single-pass connection reset, retrying: {e}")
-            self.session = create_robust_session()
-            resp = self.session.post(url, json=payload, timeout=api_timeout)
-
-        if resp.status_code != 200:
-            err_body = resp.text[:300]
-            Logger.error(f"Single-Pass Dictation Failed (HTTP {resp.status_code})", err_body)
-            # Automatic fallback to pure transcribe
-            Logger.info("Attempting automatic fallback to gemini-3.5-transcribe...")
-            return self._transcribe_pure_verbatim(audio_b64, mime_type, api_key, api_timeout)
-
-        candidates = resp.json().get("candidates", [])
-        if not candidates:
-            return ""
-
-        parts = candidates[0].get("content", {}).get("parts", [])
-        text = parts[0].get("text", "").strip() if parts else ""
-        return apply_deterministic_tech_normalization(text)
-
-    def _transcribe_pure_verbatim(self, audio_b64, mime_type, api_key, api_timeout):
-        """Pure Verbatim fallback using dedicated ASR model (gemini-3.5-transcribe)."""
+        audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
+        api_timeout = max(12.0, min(180.0, 12.0 + (duration_sec * 0.15)))
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.transcribe_model}:generateContent?key={api_key}"
         payload = {
             "contents": [{
@@ -916,15 +883,67 @@ class VoiceFlowDaemon:
                 ]
             }]
         }
+
+        try:
+            resp = self.session.post(url, json=payload, timeout=api_timeout)
+            if resp.status_code == 200:
+                candidates = resp.json().get("candidates", [])
+                if candidates:
+                    parts = candidates[0].get("content", {}).get("parts", [])
+                    text = parts[0].get("text", "").strip() if parts else ""
+                    if text:
+                        return text
+            else:
+                Logger.warn(f"Stage 1 Transcribe HTTP {resp.status_code}. Falling back to Flash-Lite...")
+        except Exception as e:
+            Logger.warn(f"Stage 1 connection reset, retrying: {e}")
+
+        # Fallback to Flash-Lite ASR
+        return self._transcribe_fallback_flash_lite(audio_b64, mime_type, api_key, api_timeout)
+
+    def _transcribe_fallback_flash_lite(self, audio_b64, mime_type, api_key, api_timeout):
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.cleanup_model}:generateContent?key={api_key}"
+        payload = {
+            "system_instruction": {"parts": [{"text": ASR_TRANSCRIPTION_PROMPT}]},
+            "contents": [{"parts": [{"inline_data": {"mime_type": mime_type, "data": audio_b64}}]}],
+            "generationConfig": {"temperature": 0.0, "maxOutputTokens": 4096}
+        }
         try:
             resp = self.session.post(url, json=payload, timeout=api_timeout)
             if resp.status_code == 200:
                 parts = resp.json().get("candidates", [{}])[0].get("content", {}).get("parts", [])
-                raw = parts[0].get("text", "").strip() if parts else ""
-                return apply_deterministic_tech_normalization(raw)
+                return parts[0].get("text", "").strip() if parts else ""
         except Exception as e:
-            Logger.error(f"Verbatim fallback exception: {e}")
+            Logger.error(f"Fallback ASR error: {e}")
         return ""
+
+    def _clean_text_stage2(self, raw_transcript, api_key):
+        """
+        Stage 2: Deep language cleanup & restructuring via Gemini 3.5 Flash-Lite.
+        Strips verbal fillers, fixes spoken tongue slips, and smooths syntax.
+        """
+        prompt = get_cleanup_prompt()
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.cleanup_model}:generateContent?key={api_key}"
+        payload = {
+            "system_instruction": {"parts": [{"text": prompt}]},
+            "contents": [{"parts": [{"text": raw_transcript}]}],
+            "generationConfig": {"temperature": 0.1, "maxOutputTokens": 2048}
+        }
+
+        try:
+            resp = self.session.post(url, json=payload, timeout=12.0)
+            if resp.status_code == 200:
+                candidates = resp.json().get("candidates", [])
+                if candidates:
+                    parts = candidates[0].get("content", {}).get("parts", [])
+                    clean = parts[0].get("text", "").strip() if parts else raw_transcript
+                    return apply_deterministic_tech_normalization(clean)
+            else:
+                Logger.error(f"Stage 2 Cleanup HTTP {resp.status_code}. Using raw transcript.")
+        except Exception as e:
+            Logger.warn(f"Stage 2 exception: {e}")
+
+        return apply_deterministic_tech_normalization(raw_transcript)
 
     def _process_and_paste(self, wav_path, hold_duration_sec):
         t0 = time.time()
@@ -945,7 +964,6 @@ class VoiceFlowDaemon:
             t_c0 = time.time()
             audio_bytes, mime_type = compress_audio_in_memory(wav_path)
             t_compress = time.time() - t_c0
-            audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
 
             api_key = self._resolve_api_key()
             if not api_key:
@@ -956,27 +974,35 @@ class VoiceFlowDaemon:
                 self.show_notification("Configuration Error", "Missing API key! Run 'gemini-flow setup'.")
                 return
 
-            # 3. Single-Pass High-Precision Dictation (~1.1s - 1.4s)
-            t_api0 = time.time()
-            if self.cfg.get("clean_transcript", True):
-                transcribed_text = self._transcribe_single_pass(audio_b64, mime_type, api_key, hold_duration_sec)
-            else:
-                transcribed_text = self._transcribe_pure_verbatim(audio_b64, mime_type, api_key, 15.0)
-            t_api = time.time() - t_api0
+            # 3. Stage 1: Fast & Accurate ASR Audio Transcription
+            t_stg1 = time.time()
+            raw_text = self._transcribe_audio_stage1(audio_bytes, mime_type, api_key, hold_duration_sec)
+            t_stage1 = time.time() - t_stg1
 
-            if not transcribed_text or transcribed_text.strip() in ("<noise>", "<silence>", "[noise]", "[silence]"):
+            if not raw_text or raw_text.strip() in ("<noise>", "<silence>", "[noise]", "[silence]"):
                 Logger.info("No speech detected in audio.")
                 self.show_notification("Notice", "No speech detected.")
                 return
 
+            # 4. Stage 2: Deep Language Cleanup & Thought Restructuring via Flash-Lite
+            final_text = raw_text
+            t_stage2 = 0.0
+            if self.cfg.get("clean_transcript", True):
+                t_stg2 = time.time()
+                final_text = self._clean_text_stage2(raw_text, api_key)
+                t_stage2 = time.time() - t_stg2
+            else:
+                final_text = apply_deterministic_tech_normalization(raw_text)
+
             elapsed = round(time.time() - t0, 2)
             file_kb = round(len(audio_bytes) / 1024, 1)
-            Logger.success(f"Dictation finished in {elapsed}s (API: {t_api:.2f}s, Prep: {t_compress:.2f}s, {file_kb}KB):")
-            print(f"      {Logger.BOLD}Text :{Logger.RESET} \"{transcribed_text[:80]}{'...' if len(transcribed_text) > 80 else ''}\"", flush=True)
+            Logger.success(f"Dictation finished in {elapsed}s (ASR: {t_stage1:.2f}s, NLP: {t_stage2:.2f}s, Prep: {t_compress:.2f}s, {file_kb}KB):")
+            print(f"      {Logger.DIM}Raw  :{Logger.RESET} \"{raw_text[:75]}{'...' if len(raw_text) > 75 else ''}\"")
+            print(f"      {Logger.BOLD}Clean:{Logger.RESET} \"{final_text[:75]}{'...' if len(final_text) > 75 else ''}\"", flush=True)
 
             self.play_sound("complete")
-            self._paste_text(transcribed_text)
-            self.show_notification("Done", transcribed_text[:60] + ("..." if len(transcribed_text) > 60 else ""))
+            self._paste_text(final_text)
+            self.show_notification("Done", final_text[:60] + ("..." if len(final_text) > 60 else ""))
 
         except Exception as e:
             Logger.error(f"Processing exception occurred: {e}", exc=e)
