@@ -961,19 +961,12 @@ class VoiceFlowDaemon:
 
     def _clean_text_stage2(self, raw_transcript, api_key):
         """
-        Stage 2: Ultra-Fast language cleanup & restructuring via Gemini 3.1 Flash-Lite
+        Stage 2: Ultra-Fast language cleanup & restructuring via Gemini 2.5 Flash
         with Server-Sent Events (SSE) streaming for sub-2.5s TTFB and zero gateway buffering.
         Strips verbal fillers, fixes spoken tongue slips, and smooths syntax.
         """
         prompt = get_cleanup_prompt()
-        payload = {
-            "system_instruction": {"parts": [{"text": prompt}]},
-            "contents": [{"parts": [{"text": raw_transcript}]}],
-            "generationConfig": {"temperature": 0.1, "maxOutputTokens": 2048}
-        }
 
-        # Strict TTFB timeout: A healthy streaming model sends first tokens in <1.5s.
-        # If no stream begins within 3.5s, failover immediately to the next responsive model.
         # Dynamic model cascade in order of speed & responsiveness
         models_to_try = [self.cleanup_model]
         for fb in self.fallback_cleanup_models:
@@ -981,6 +974,16 @@ class VoiceFlowDaemon:
                 models_to_try.append(fb)
 
         for idx, model_name in enumerate(models_to_try):
+            gen_config = {"temperature": 0.1, "maxOutputTokens": 2048}
+            if "2.5" in model_name:
+                gen_config["thinkingConfig"] = {"thinkingBudget": 0}
+
+            payload = {
+                "system_instruction": {"parts": [{"text": prompt}]},
+                "contents": [{"parts": [{"text": raw_transcript}]}],
+                "generationConfig": gen_config
+            }
+
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:streamGenerateContent?alt=sse&key={api_key}"
             try:
                 to = self.cleanup_timeout_sec if idx == 0 else min(4.5, self.cleanup_timeout_sec)
