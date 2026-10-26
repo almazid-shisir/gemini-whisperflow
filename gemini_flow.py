@@ -964,7 +964,7 @@ class VoiceFlowDaemon:
     def _clean_text_stage2(self, raw_transcript, api_key):
         """
         Stage 2: Deep language cleanup & restructuring via Gemini 3.1 Flash-Lite
-        with strict latency ceiling and dynamic model failover.
+        with adaptive length-aware latency ceiling and dynamic model failover.
         Strips verbal fillers, fixes spoken tongue slips, and smooths syntax.
         """
         prompt = get_cleanup_prompt()
@@ -974,16 +974,25 @@ class VoiceFlowDaemon:
             "generationConfig": {"temperature": 0.1, "maxOutputTokens": 2048}
         }
 
+        # Dynamic adaptive timeout based on transcript length:
+        # Short speech (<100 chars): ~2.6s
+        # Medium speech (300 chars): ~3.6s
+        # Long paragraphs (1000+ chars): ~5.5s - 7.5s (prevents premature abort on 1-2 min dictations)
+        char_len = len(raw_transcript)
+        adaptive_timeout = max(2.6, min(7.5, 2.2 + (char_len / 220.0)))
+
         # Dynamic model cascade in order of speed
         models_to_try = [self.cleanup_model]
         for fb in self.fallback_cleanup_models:
             if fb not in models_to_try:
                 models_to_try.append(fb)
 
-        for model_name in models_to_try:
+        for idx, model_name in enumerate(models_to_try):
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
             try:
-                resp = self.session.post(url, json=payload, timeout=self.cleanup_timeout_sec)
+                # Primary model gets full adaptive budget; fallback models get tighter budget to avoid compounding delays
+                timeout_val = adaptive_timeout if idx == 0 else min(3.0, adaptive_timeout)
+                resp = self.session.post(url, json=payload, timeout=timeout_val)
                 if resp.status_code == 200:
                     candidates = resp.json().get("candidates", [])
                     if candidates:
@@ -994,7 +1003,10 @@ class VoiceFlowDaemon:
                 else:
                     Logger.warn(f"Stage 2 ({model_name}) HTTP {resp.status_code}. Trying fallback model...")
             except Exception as e:
-                Logger.warn(f"Stage 2 ({model_name}) timed out or failed (Ceiling: {self.cleanup_timeout_sec}s): {e}")
+                Logger.warn(f"Stage 2 ({model_name}) timed out or failed (Ceiling: {adaptive_timeout:.1f}s): {e}")
+                # If primary timed out on long text, fallback models will also time out; abort cascade early
+                if "timed out" in str(e).lower() and char_len > 500:
+                    break
 
         Logger.warn("Stage 2 all models timed out/failed. Instant fallback to Stage 1 verbatim.")
         return apply_deterministic_tech_normalization(raw_transcript)
