@@ -1,12 +1,12 @@
 {
   "gemini_api_key": "",
   "transcribe_model": "gemini-3.5-transcribe",
-  "cleanup_model": "gemini-3.1-flash-lite",
+  "cleanup_model": "gemini-3.1-flash-lite-preview",
   "fallback_cleanup_models": [
-    "gemini-3.1-flash-lite-preview",
+    "gemini-3.1-flash-lite",
     "gemini-3-flash-preview"
   ],
-  "cleanup_timeout_sec": 2.2,
+  "cleanup_timeout_sec": 3.5,
   "trigger_key": "smart",
   "clean_transcript": true,
   "sound_feedback": false,
