@@ -1,39 +1,39 @@
-# 🎙️ Gemini WhisperFlow for Linux
+#  Gemini WhisperFlow for Linux
 
-**Single-Pass Ultra-Fast Linux Voice Dictation & Code-Switching Engine**
+**Single-Pass Linux Voice Dictation & Code-Switching Engine**
 
 Gemini WhisperFlow is a privacy-first, zero-bloat voice dictation daemon for Linux (**X11 & Wayland**). It acts as an open-source, ultra-accurate alternative to tools like Wispr Flow and Superwhisper.
 
-Powered by a **Single-Pass Ultra-Fast Architecture**:
+Powered by a **Single-Pass Architecture**:
 * **Sub-1.5s End-to-End Latency:** Single high-precision multimodal request to `gemini-3.5-flash-lite` with in-memory audio processing.
 * **Zero Generative Hallucination:** Strict verbatim prompt retains natural colloquial phrasing (Bengali/English code-switching) without unauthorized summarizing, rewriting, or conversational drift.
 * **Deterministic Tech Normalization:** Client-side regex engine instantly standardizes tech terms (`Vercel`, `GitHub`, `CEO`, `Python`, `Linux`).
 
 ---
 
-## ✨ Features & Highlights
+##  Features & Highlights
 
-- **⚡ Blazing Fast Single-Pass Execution (<1.5s total):**
+- ** Single-Pass Execution (<1.5s total):**
   - Eliminates the slow double-hop API bottleneck. Audio is processed directly in RAM and transcribed in a single hop.
   - In-memory pipe encoding eliminates local disk I/O latency.
 
-- **🎯 Exact Verbatim Speech Fidelity (Zero Hallucination):**
+- ** Exact Verbatim Speech Fidelity (Zero Hallucination):**
   - What you speak is exactly what is transcribed. No rewriting, no invented connecting thoughts, no awkward formal tone shifts.
   - Automatically punctuates (।, ?, ,) and capitalizes English terms properly.
 
-- **🕹️ Smart Multi-Trigger (Right Alt / Right Shift / Right Ctrl):**
+- ** Smart Multi-Trigger (Right Alt / Right Shift / Right Ctrl):**
   - **Hold-to-Talk (Push-to-Talk):** Hold `Right Alt` (AltGr) or `Right Shift`, speak, and release to paste immediately.
   - **Hands-Free Toggle:** Tap `Right Alt` once (<0.35s) to lock mic ON. Speak freely with relaxed hands for 5, 10, or 20+ minutes. Tap again (or press `Esc`) to finish and paste!
   - **Instant Visual Notification:** Prominent desktop popup appears the instant you trigger recording.
 
-- **🛡️ 5ms In-Memory Silence Gate:**
+- ** 5ms In-Memory Silence Gate:**
   - Instant waveform peak detector (`silence_threshold_db: -45.0 dB`).
   - Discards room silence or background noise locally without hitting cloud quota.
 
-- **📋 Safe Native Clipboard Paste:**
+- ** Safe Native Clipboard Paste:**
   - Automatically detects Wayland (`wl-copy` / `wtype` / `ydotool`) and X11 (`xclip` / `xdotool`).
 
-- **🔍 Rich Terminal Logging & Diagnostics:**
+- ** Rich Terminal Logging & Diagnostics:**
   - Real-time colored terminal logs with precise millisecond latency breakdowns (`ASR`, `NLP`, `Comp`).
   - Detailed diagnostic error messages for network drops, invalid API keys, or quiet audio.
 
@@ -85,14 +85,14 @@ Place your text cursor in **any application** (VS Code, Chrome, Telegram, Termin
 
 ### Option 2: Hands-Free Dictation (Long Form / Paragraphs)
 1. **Tap `Right Alt` (or `Right Shift`) once quickly (<0.35s)**.
-2. A desktop notification and terminal log will confirm: `🎙️ Hands-Free Mode Active`.
+2. A desktop notification and terminal log will confirm: ` Hands-Free Mode Active`.
 3. Speak as long as you want (5, 10, 15+ minutes) without holding any key down.
 4. When finished, **tap the key once again** (or press `Esc`).
 5. Your speech will be transcribed verbatim and pasted into your active window!
 
 ---
 
-## 🛠️ CLI Management Commands
+## 🛠 CLI Management Commands
 
 Manage the daemon easily using `gemini-flow`:
 
@@ -111,7 +111,7 @@ gemini-flow config      # Edit configuration file in terminal
 
 ---
 
-## ⚙️ Configuration File
+## ⚙ Configuration File
 
 Configuration is stored at `~/.config/gemini-voice-flow/config.json`:
 
@@ -152,7 +152,7 @@ Configuration is stored at `~/.config/gemini-voice-flow/config.json`:
 
 ---
 
-## 🗑️ Uninstallation
+## 🗑 Uninstallation
 
 To cleanly remove Gemini WhisperFlow and its services from your system:
 
@@ -163,7 +163,7 @@ cd gemini-whisperflow
 
 ---
 
-## 🔍 Troubleshooting & Diagnostic Logs
+##  Troubleshooting & Diagnostic Logs
 
 If you encounter any issues:
 
