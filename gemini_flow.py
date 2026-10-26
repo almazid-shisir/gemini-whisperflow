@@ -401,10 +401,10 @@ def compress_audio_in_memory(wav_path):
 # ==============================================================================
 # Gemini API Verification & Interactive Setup
 # ==============================================================================
-def verify_gemini_api_key(api_key, transcribe_model="gemini-3.5-transcribe", cleanup_model="gemini-3.1-flash-lite"):
+def verify_gemini_api_key(api_key, transcribe_model="gemini-3.5-transcribe", cleanup_model="gemini-3.1-flash-lite", fallback_models=None):
     """
     Verify Gemini API key against Google API servers.
-    Tests both the specialized transcribe model and the cleanup model.
+    Tests both the specialized transcribe model and the cleanup model (with failover cascade).
     Returns (success: bool, error_message: str)
     """
     if not api_key:
@@ -424,24 +424,34 @@ def verify_gemini_api_key(api_key, transcribe_model="gemini-3.5-transcribe", cle
                 err_msg = resp1.text[:200]
             return False, f"Model '{transcribe_model}' check failed (HTTP {resp1.status_code}): {err_msg}"
     except requests.exceptions.RequestException as e:
-        return False, f"Network connection error: {e}"
+        return False, f"Network connection error on {transcribe_model}: {e}"
 
-    # 2. Test Flash-Lite model inference
-    try:
-        url2 = f"https://generativelanguage.googleapis.com/v1beta/models/{cleanup_model}:generateContent?key={api_key}"
-        payload = {"contents": [{"parts": [{"text": "ping"}]}]}
-        resp2 = session.post(url2, json=payload, timeout=6.0)
-        if resp2.status_code != 200:
-            err_msg = ""
-            try:
-                err_msg = resp2.json().get("error", {}).get("message", resp2.text[:200])
-            except Exception:
-                err_msg = resp2.text[:200]
-            return False, f"Model '{cleanup_model}' check failed (HTTP {resp2.status_code}): {err_msg}"
-    except requests.exceptions.RequestException as e:
-        return False, f"Network connection error: {e}"
+    # 2. Test Cleanup model inference (with fallback cascade)
+    check_list = [cleanup_model]
+    if fallback_models:
+        for fb in fallback_models:
+            if fb not in check_list:
+                check_list.append(fb)
 
-    return True, "API Key successfully validated for both models!"
+    last_err = ""
+    for cm in check_list:
+        try:
+            url2 = f"https://generativelanguage.googleapis.com/v1beta/models/{cm}:generateContent?key={api_key}"
+            payload = {"contents": [{"parts": [{"text": "ping"}]}]}
+            resp2 = session.post(url2, json=payload, timeout=4.0)
+            if resp2.status_code == 200:
+                return True, f"API Key validated! ({cm} is responsive)"
+            else:
+                err_msg = ""
+                try:
+                    err_msg = resp2.json().get("error", {}).get("message", resp2.text[:200])
+                except Exception:
+                    err_msg = resp2.text[:200]
+                last_err = f"Model '{cm}' check failed (HTTP {resp2.status_code}): {err_msg}"
+        except requests.exceptions.RequestException as e:
+            last_err = f"Network connection error on '{cm}': {e}"
+
+    return False, last_err
 
 
 def interactive_setup():
@@ -484,7 +494,12 @@ def interactive_setup():
             continue
 
         print(f"\n{Logger.CYAN}Connecting to Google Gemini API to test your key...{Logger.RESET}")
-        ok, msg = verify_gemini_api_key(api_key, cfg.get("transcribe_model", "gemini-3.5-transcribe"), cfg.get("cleanup_model", "gemini-3.1-flash-lite"))
+        ok, msg = verify_gemini_api_key(
+            api_key,
+            cfg.get("transcribe_model", "gemini-3.5-transcribe"),
+            cfg.get("cleanup_model", "gemini-3.1-flash-lite"),
+            cfg.get("fallback_cleanup_models", ["gemini-3.1-flash-lite-preview", "gemini-3-flash-preview"])
+        )
         if ok:
             Logger.success("Google Gemini API Key verified successfully!")
             print(f"   • Ultra-Fast Engine : {Logger.GREEN}{cfg.get('cleanup_model', 'gemini-3.1-flash-lite')}{Logger.RESET} [READY]")
@@ -591,7 +606,12 @@ def run_self_test(cfg):
 
     # 1. API Verification
     Logger.info("1/3 Testing Google Gemini API connectivity...")
-    ok, msg = verify_gemini_api_key(api_key, cfg.get("transcribe_model"), cfg.get("cleanup_model"))
+    ok, msg = verify_gemini_api_key(
+        api_key,
+        cfg.get("transcribe_model", "gemini-3.5-transcribe"),
+        cfg.get("cleanup_model", "gemini-3.1-flash-lite"),
+        cfg.get("fallback_cleanup_models", ["gemini-3.1-flash-lite-preview", "gemini-3-flash-preview"])
+    )
     if not ok:
         Logger.error("API test failed!", msg)
         return False
