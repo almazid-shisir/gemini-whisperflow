@@ -975,11 +975,11 @@ class VoiceFlowDaemon:
         }
 
         # Dynamic adaptive timeout based on transcript length:
-        # Short speech (<100 chars): ~2.6s
-        # Medium speech (300 chars): ~3.6s
-        # Long paragraphs (1000+ chars): ~5.5s - 7.5s (prevents premature abort on 1-2 min dictations)
+        # Short speech (<100 chars): ~3.0s
+        # Medium speech (300 chars): ~4.5s
+        # Long paragraphs (800+ chars): ~7.5s - 9.5s (ensures full thought restructuring for 1-2 min dictations)
         char_len = len(raw_transcript)
-        adaptive_timeout = max(2.6, min(7.5, 2.2 + (char_len / 220.0)))
+        adaptive_timeout = max(3.0, min(9.5, 2.5 + (char_len / 150.0)))
 
         # Dynamic model cascade in order of speed
         models_to_try = [self.cleanup_model]
@@ -990,8 +990,8 @@ class VoiceFlowDaemon:
         for idx, model_name in enumerate(models_to_try):
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
             try:
-                # Primary model gets full adaptive budget; fallback models get tighter budget to avoid compounding delays
-                timeout_val = adaptive_timeout if idx == 0 else min(3.0, adaptive_timeout)
+                # Primary model gets full adaptive budget; fallback models get focused budget
+                timeout_val = adaptive_timeout if idx == 0 else min(4.5, adaptive_timeout)
                 resp = self.session.post(url, json=payload, timeout=timeout_val)
                 if resp.status_code == 200:
                     candidates = resp.json().get("candidates", [])
@@ -1004,9 +1004,6 @@ class VoiceFlowDaemon:
                     Logger.warn(f"Stage 2 ({model_name}) HTTP {resp.status_code}. Trying fallback model...")
             except Exception as e:
                 Logger.warn(f"Stage 2 ({model_name}) timed out or failed (Ceiling: {adaptive_timeout:.1f}s): {e}")
-                # If primary timed out on long text, fallback models will also time out; abort cascade early
-                if "timed out" in str(e).lower() and char_len > 500:
-                    break
 
         Logger.warn("Stage 2 all models timed out/failed. Instant fallback to Stage 1 verbatim.")
         return apply_deterministic_tech_normalization(raw_transcript)
