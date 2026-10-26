@@ -974,13 +974,8 @@ class VoiceFlowDaemon:
             "generationConfig": {"temperature": 0.1, "maxOutputTokens": 2048}
         }
 
-        # Dynamic adaptive timeout based on transcript length:
-        # Short speech (<100 chars): ~3.5s
-        # Medium speech (300 chars): ~4.5s
-        # Long paragraphs (800+ chars): ~7.5s - 9.0s
-        char_len = len(raw_transcript)
-        stream_timeout = max(3.5, min(9.0, 2.5 + (char_len / 160.0)))
-
+        # Strict TTFB timeout: A healthy streaming model sends first tokens in <1.5s.
+        # If no stream begins within 3.5s, failover immediately to the next responsive model.
         # Dynamic model cascade in order of speed & responsiveness
         models_to_try = [self.cleanup_model]
         for fb in self.fallback_cleanup_models:
@@ -990,7 +985,7 @@ class VoiceFlowDaemon:
         for idx, model_name in enumerate(models_to_try):
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:streamGenerateContent?alt=sse&key={api_key}"
             try:
-                to = stream_timeout if idx == 0 else min(4.5, stream_timeout)
+                to = 3.5 if idx == 0 else 4.0
                 resp = self.session.post(url, json=payload, stream=True, timeout=to)
                 if resp.status_code == 200:
                     chunks = []
@@ -1014,7 +1009,7 @@ class VoiceFlowDaemon:
                 else:
                     Logger.warn(f"Stage 2 ({model_name}) HTTP {resp.status_code}. Trying fallback model...")
             except Exception as e:
-                Logger.warn(f"Stage 2 ({model_name}) error (Ceiling: {stream_timeout:.1f}s): {e}")
+                Logger.warn(f"Stage 2 ({model_name}) error (TTFB Ceiling: {to}s): {e}")
 
         Logger.warn("Stage 2 all models timed out/failed. Instant fallback to Stage 1 verbatim.")
         return apply_deterministic_tech_normalization(raw_transcript)
