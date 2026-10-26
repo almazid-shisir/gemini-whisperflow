@@ -48,7 +48,7 @@ CUSTOM_PROMPT_PATH = os.path.join(CONFIG_DIR, "prompt.txt")
 DEFAULT_CONFIG = {
     "gemini_api_key": "",
     "transcribe_model": "gemini-3.5-transcribe",
-    "cleanup_model": "gemini-3.1-flash-lite-preview",
+    "cleanup_model": "gemini-2.5-flash",
     "fallback_cleanup_models": ["gemini-3.1-flash-lite", "gemini-3-flash-preview"],
     "trigger_key": "smart",
     "clean_transcript": True,
@@ -56,7 +56,7 @@ DEFAULT_CONFIG = {
     "notify": True,
     "min_hold_seconds": 0.35,
     "silence_threshold_db": -48.0,
-    "cleanup_timeout_sec": 3.5
+    "cleanup_timeout_sec": 5.0
 }
 
 ASR_TRANSCRIPTION_PROMPT = """You are an ultra-accurate verbatim speech-to-text engine specializing in bilingual Bengali, English, and Banglish code-switching.
@@ -180,8 +180,8 @@ class Logger:
     def banner(cls, cfg):
         trig = cfg.get("trigger_key", "smart").replace("_", " ").title()
         trans_model = cfg.get("transcribe_model", "gemini-3.5-transcribe")
-        clean_model = cfg.get("cleanup_model", "gemini-3.1-flash-lite")
-        c_timeout = cfg.get("cleanup_timeout_sec", 2.2)
+        clean_model = cfg.get("cleanup_model", "gemini-2.5-flash")
+        c_timeout = cfg.get("cleanup_timeout_sec", 5.0)
         mode = "Two-Stage Clean Dictation" if cfg.get("clean_transcript", True) else "Pure Verbatim"
         w = 68
         print(f"{cls.CYAN}{'═' * w}{cls.RESET}")
@@ -694,11 +694,9 @@ class VoiceFlowDaemon:
         self.silence_threshold_db = float(cfg.get("silence_threshold_db", -48.0))
 
         self.transcribe_model = cfg.get("transcribe_model", "gemini-3.5-transcribe")
-        self.cleanup_model = cfg.get("cleanup_model", "gemini-3.1-flash-lite")
-        if self.cleanup_model in ("gemini-3.5-flash-lite", "gemini-3.5-flash"):
-            self.cleanup_model = "gemini-3.1-flash-lite"
-        self.fallback_cleanup_models = cfg.get("fallback_cleanup_models", ["gemini-3.1-flash-lite-preview", "gemini-3-flash-preview"])
-        self.cleanup_timeout_sec = float(cfg.get("cleanup_timeout_sec", 2.2))
+        self.cleanup_model = cfg.get("cleanup_model", "gemini-2.5-flash")
+        self.fallback_cleanup_models = cfg.get("fallback_cleanup_models", ["gemini-3.1-flash-lite", "gemini-3-flash-preview"])
+        self.cleanup_timeout_sec = float(cfg.get("cleanup_timeout_sec", 5.0))
 
         self.session = create_robust_session()
         threading.Thread(target=self._prewarm_connection, daemon=True).start()
@@ -985,7 +983,7 @@ class VoiceFlowDaemon:
         for idx, model_name in enumerate(models_to_try):
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:streamGenerateContent?alt=sse&key={api_key}"
             try:
-                to = 3.5 if idx == 0 else 4.0
+                to = self.cleanup_timeout_sec if idx == 0 else min(4.5, self.cleanup_timeout_sec)
                 resp = self.session.post(url, json=payload, stream=True, timeout=to)
                 if resp.status_code == 200:
                     chunks = []
