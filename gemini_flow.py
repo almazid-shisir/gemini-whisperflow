@@ -6,7 +6,7 @@ High-Precision Voice Dictation & Thought Restructuring Engine
 Architecture:
   - Stage 1 (ASR): Google Gemini 3.5 Transcribe (models/gemini-3.5-transcribe)
                    Ultra-fast, verbatim speech-to-text. Zero hallucination on silence/noise.
-  - Stage 2 (NLP): Google Gemini 3.5 Flash-Lite (models/gemini-3.5-flash-lite)
+  - Stage 2 (NLP): Google Gemini 3.1 Flash-Lite (models/gemini-3.1-flash-lite)
                    Deep thought clarifier, fluff/filler removal ("মানে", "আসলে", "তো এই"),
                    and spoken tech term normalization ("সিও" -> "CEO", "ভার্সেল" -> "Vercel").
 
@@ -48,13 +48,15 @@ CUSTOM_PROMPT_PATH = os.path.join(CONFIG_DIR, "prompt.txt")
 DEFAULT_CONFIG = {
     "gemini_api_key": "",
     "transcribe_model": "gemini-3.5-transcribe",
-    "cleanup_model": "gemini-3.5-flash-lite",
+    "cleanup_model": "gemini-3.1-flash-lite",
+    "fallback_cleanup_models": ["gemini-3.1-flash-lite-preview", "gemini-3-flash-preview"],
     "trigger_key": "smart",
     "clean_transcript": True,
     "sound_feedback": False,
     "notify": True,
     "min_hold_seconds": 0.35,
-    "silence_threshold_db": -48.0
+    "silence_threshold_db": -48.0,
+    "cleanup_timeout_sec": 2.2
 }
 
 ASR_TRANSCRIPTION_PROMPT = """You are an ultra-accurate verbatim speech-to-text engine specializing in bilingual Bengali, English, and Banglish code-switching.
@@ -178,7 +180,8 @@ class Logger:
     def banner(cls, cfg):
         trig = cfg.get("trigger_key", "smart").replace("_", " ").title()
         trans_model = cfg.get("transcribe_model", "gemini-3.5-transcribe")
-        clean_model = cfg.get("cleanup_model", "gemini-3.5-flash-lite")
+        clean_model = cfg.get("cleanup_model", "gemini-3.1-flash-lite")
+        c_timeout = cfg.get("cleanup_timeout_sec", 2.2)
         mode = "Two-Stage Clean Dictation" if cfg.get("clean_transcript", True) else "Pure Verbatim"
         w = 68
         print(f"{cls.CYAN}{'═' * w}{cls.RESET}")
@@ -186,7 +189,7 @@ class Logger:
         print(f"{cls.CYAN}{'─' * w}{cls.RESET}")
         print(f"  {cls.BOLD}Trigger Key{cls.RESET}  : [{trig}] (Hold to talk | Tap to toggle hands-free)")
         print(f"  {cls.BOLD}Stage 1 ASR{cls.RESET}  : {cls.GREEN}{trans_model}{cls.RESET} (1000% Verbatim Accuracy)")
-        print(f"  {cls.BOLD}Stage 2 NLP{cls.RESET}  : {cls.GREEN}{clean_model}{cls.RESET} (Flash Thought Clarifier & Fluff Stripper)")
+        print(f"  {cls.BOLD}Stage 2 NLP{cls.RESET}  : {cls.GREEN}{clean_model}{cls.RESET} (Latency-Ceiling: {c_timeout}s with Failover)")
         print(f"  {cls.BOLD}Output Mode{cls.RESET}  : {mode}")
         print(f"  {cls.BOLD}Config File{cls.RESET}  : {CONFIG_PATH}")
         print(f"{cls.CYAN}{'═' * w}{cls.RESET}\n", flush=True)
@@ -221,6 +224,23 @@ def load_config():
             cfg = json.load(f)
             merged = DEFAULT_CONFIG.copy()
             merged.update(cfg)
+            # Automatic migration away from hanging 3.5 text models
+            needs_save = False
+            if merged.get("cleanup_model") in ("gemini-3.5-flash-lite", "gemini-3.5-flash"):
+                merged["cleanup_model"] = "gemini-3.1-flash-lite"
+                needs_save = True
+            if "model" in merged:
+                if merged.get("model") in ("gemini-3.5-flash-lite", "gemini-3.5-flash"):
+                    merged["model"] = "gemini-3.1-flash-lite"
+                    needs_save = True
+            if "fallback_cleanup_models" not in cfg:
+                merged["fallback_cleanup_models"] = ["gemini-3.1-flash-lite-preview", "gemini-3-flash-preview"]
+                needs_save = True
+            if "cleanup_timeout_sec" not in cfg:
+                merged["cleanup_timeout_sec"] = 2.2
+                needs_save = True
+            if needs_save:
+                save_config(merged)
             return merged
     except Exception as e:
         Logger.error(f"Failed to read config file ({CONFIG_PATH}): {e}", "Falling back to default settings.")
@@ -381,7 +401,7 @@ def compress_audio_in_memory(wav_path):
 # ==============================================================================
 # Gemini API Verification & Interactive Setup
 # ==============================================================================
-def verify_gemini_api_key(api_key, transcribe_model="gemini-3.5-transcribe", cleanup_model="gemini-3.5-flash-lite"):
+def verify_gemini_api_key(api_key, transcribe_model="gemini-3.5-transcribe", cleanup_model="gemini-3.1-flash-lite"):
     """
     Verify Gemini API key against Google API servers.
     Tests both the specialized transcribe model and the cleanup model.
@@ -464,10 +484,10 @@ def interactive_setup():
             continue
 
         print(f"\n{Logger.CYAN}Connecting to Google Gemini API to test your key...{Logger.RESET}")
-        ok, msg = verify_gemini_api_key(api_key, cfg.get("transcribe_model", "gemini-3.5-transcribe"), cfg.get("cleanup_model", "gemini-3.5-flash-lite"))
+        ok, msg = verify_gemini_api_key(api_key, cfg.get("transcribe_model", "gemini-3.5-transcribe"), cfg.get("cleanup_model", "gemini-3.1-flash-lite"))
         if ok:
             Logger.success("Google Gemini API Key verified successfully!")
-            print(f"   • Ultra-Fast Engine : {Logger.GREEN}{cfg.get('cleanup_model', 'gemini-3.5-flash-lite')}{Logger.RESET} [READY]")
+            print(f"   • Ultra-Fast Engine : {Logger.GREEN}{cfg.get('cleanup_model', 'gemini-3.1-flash-lite')}{Logger.RESET} [READY]")
             print(f"   • ASR Backup Engine  : {Logger.GREEN}{cfg.get('transcribe_model', 'gemini-3.5-transcribe')}{Logger.RESET} [READY]")
             cfg["gemini_api_key"] = api_key
             break
@@ -654,7 +674,11 @@ class VoiceFlowDaemon:
         self.silence_threshold_db = float(cfg.get("silence_threshold_db", -48.0))
 
         self.transcribe_model = cfg.get("transcribe_model", "gemini-3.5-transcribe")
-        self.cleanup_model = cfg.get("cleanup_model", "gemini-3.5-flash-lite")
+        self.cleanup_model = cfg.get("cleanup_model", "gemini-3.1-flash-lite")
+        if self.cleanup_model in ("gemini-3.5-flash-lite", "gemini-3.5-flash"):
+            self.cleanup_model = "gemini-3.1-flash-lite"
+        self.fallback_cleanup_models = cfg.get("fallback_cleanup_models", ["gemini-3.1-flash-lite-preview", "gemini-3-flash-preview"])
+        self.cleanup_timeout_sec = float(cfg.get("cleanup_timeout_sec", 2.2))
 
         self.session = create_robust_session()
         threading.Thread(target=self._prewarm_connection, daemon=True).start()
@@ -919,30 +943,40 @@ class VoiceFlowDaemon:
 
     def _clean_text_stage2(self, raw_transcript, api_key):
         """
-        Stage 2: Deep language cleanup & restructuring via Gemini 3.5 Flash-Lite.
+        Stage 2: Deep language cleanup & restructuring via Gemini 3.1 Flash-Lite
+        with strict latency ceiling and dynamic model failover.
         Strips verbal fillers, fixes spoken tongue slips, and smooths syntax.
         """
         prompt = get_cleanup_prompt()
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.cleanup_model}:generateContent?key={api_key}"
         payload = {
             "system_instruction": {"parts": [{"text": prompt}]},
             "contents": [{"parts": [{"text": raw_transcript}]}],
             "generationConfig": {"temperature": 0.1, "maxOutputTokens": 2048}
         }
 
-        try:
-            resp = self.session.post(url, json=payload, timeout=12.0)
-            if resp.status_code == 200:
-                candidates = resp.json().get("candidates", [])
-                if candidates:
-                    parts = candidates[0].get("content", {}).get("parts", [])
-                    clean = parts[0].get("text", "").strip() if parts else raw_transcript
-                    return apply_deterministic_tech_normalization(clean)
-            else:
-                Logger.error(f"Stage 2 Cleanup HTTP {resp.status_code}. Using raw transcript.")
-        except Exception as e:
-            Logger.warn(f"Stage 2 exception: {e}")
+        # Dynamic model cascade in order of speed
+        models_to_try = [self.cleanup_model]
+        for fb in self.fallback_cleanup_models:
+            if fb not in models_to_try:
+                models_to_try.append(fb)
 
+        for model_name in models_to_try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
+            try:
+                resp = self.session.post(url, json=payload, timeout=self.cleanup_timeout_sec)
+                if resp.status_code == 200:
+                    candidates = resp.json().get("candidates", [])
+                    if candidates:
+                        parts = candidates[0].get("content", {}).get("parts", [])
+                        clean = parts[0].get("text", "").strip() if parts else ""
+                        if clean:
+                            return apply_deterministic_tech_normalization(clean)
+                else:
+                    Logger.warn(f"Stage 2 ({model_name}) HTTP {resp.status_code}. Trying fallback model...")
+            except Exception as e:
+                Logger.warn(f"Stage 2 ({model_name}) timed out or failed (Ceiling: {self.cleanup_timeout_sec}s): {e}")
+
+        Logger.warn("Stage 2 all models timed out/failed. Instant fallback to Stage 1 verbatim.")
         return apply_deterministic_tech_normalization(raw_transcript)
 
     def _process_and_paste(self, wav_path, hold_duration_sec):

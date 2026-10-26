@@ -119,13 +119,18 @@ Configuration is stored at `~/.config/gemini-voice-flow/config.json`:
 {
   "gemini_api_key": "YOUR_GEMINI_API_KEY",
   "transcribe_model": "gemini-3.5-transcribe",
-  "cleanup_model": "gemini-3.5-flash-lite",
+  "cleanup_model": "gemini-3.1-flash-lite",
+  "fallback_cleanup_models": [
+    "gemini-3.1-flash-lite-preview",
+    "gemini-3-flash-preview"
+  ],
+  "cleanup_timeout_sec": 2.2,
   "trigger_key": "smart",
   "clean_transcript": true,
   "sound_feedback": false,
   "notify": true,
   "min_hold_seconds": 0.35,
-  "silence_threshold_db": -45.0
+  "silence_threshold_db": -48.0
 }
 ```
 
@@ -134,8 +139,10 @@ Configuration is stored at `~/.config/gemini-voice-flow/config.json`:
 | Setting | Type | Default | Description |
 |---|---|---|---|
 | `gemini_api_key` | string | `""` | Google Gemini API key from AI Studio. |
-| `transcribe_model` | string | `"gemini-3.5-transcribe"` | ASR transcription backup model. |
-| `cleanup_model` | string | `"gemini-3.5-flash-lite"` | Primary single-pass ultra-fast dictation engine. |
+| `transcribe_model` | string | `"gemini-3.5-transcribe"` | Stage 1 1000% verbatim speech-to-text model. |
+| `cleanup_model` | string | `"gemini-3.1-flash-lite"` | Primary Stage 2 thought clarifier & filler stripper. |
+| `fallback_cleanup_models` | list | `["gemini-3.1-flash-lite-preview", ...]` | Cascade backup models if primary times out. |
+| `cleanup_timeout_sec` | float | `2.2` | Strict latency ceiling for Stage 2 before instant verbatim paste. |
 | `trigger_key` | string | `"smart"` | Dictation trigger (`smart` accepts Right Alt & Right Shift; or `alt_r`, `shift_r`, `ctrl_r`, `f9`). |
 | `clean_transcript` | boolean | `true` | When `true`, applies code-switching punctuation & tech normalization. |
 | `min_hold_seconds` | float | `0.35` | Taps shorter than this toggle hands-free mode; holds longer behave as push-to-talk. |
