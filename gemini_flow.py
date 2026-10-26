@@ -48,8 +48,8 @@ CUSTOM_PROMPT_PATH = os.path.join(CONFIG_DIR, "prompt.txt")
 DEFAULT_CONFIG = {
     "gemini_api_key": "",
     "transcribe_model": "gemini-3.5-transcribe",
-    "cleanup_model": "gemini-2.5-flash",
-    "fallback_cleanup_models": ["gemini-3.1-flash-lite", "gemini-3-flash-preview"],
+    "cleanup_model": "gemini-2.5-flash-lite",
+    "fallback_cleanup_models": ["gemini-3-flash-preview", "gemini-3.1-flash-lite"],
     "trigger_key": "smart",
     "clean_transcript": True,
     "sound_feedback": False,
@@ -387,8 +387,12 @@ def compress_audio_in_memory(wav_path):
         "pipe:1"
     ]
     try:
+        # Dynamic timeout: at least 6s, plus 0.15s per second of estimated audio
+        file_size = os.path.getsize(wav_path) if os.path.exists(wav_path) else 0
+        est_sec = file_size / 32000.0  # 16000 Hz * 2 bytes (16-bit mono)
+        calc_timeout = max(6.0, min(30.0, 6.0 + (est_sec * 0.15)))
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-        out, _ = proc.communicate(timeout=4.0)
+        out, _ = proc.communicate(timeout=calc_timeout)
         if proc.returncode == 0 and len(out) > 200:
             return out, "audio/mp3"
     except Exception as e:
@@ -694,12 +698,30 @@ class VoiceFlowDaemon:
         self.silence_threshold_db = float(cfg.get("silence_threshold_db", -48.0))
 
         self.transcribe_model = cfg.get("transcribe_model", "gemini-3.5-transcribe")
-        self.cleanup_model = cfg.get("cleanup_model", "gemini-2.5-flash")
-        self.fallback_cleanup_models = cfg.get("fallback_cleanup_models", ["gemini-3.1-flash-lite", "gemini-3-flash-preview"])
+        self.cleanup_model = cfg.get("cleanup_model", "gemini-2.5-flash-lite")
+        self.fallback_cleanup_models = cfg.get("fallback_cleanup_models", ["gemini-3-flash-preview", "gemini-3.1-flash-lite"])
         self.cleanup_timeout_sec = float(cfg.get("cleanup_timeout_sec", 5.0))
 
         self.session = create_robust_session()
         threading.Thread(target=self._prewarm_connection, daemon=True).start()
+        threading.Thread(target=self._auto_tune_audio_hardware, daemon=True).start()
+
+    def _auto_tune_audio_hardware(self):
+        """
+        Auto-tune ALSA mixer controls on Linux to prevent 50Hz ground hum & clipping.
+        Realtek / Intel HDA codecs often default to +20dB/+30dB boost after suspend/reboot,
+        which causes massive AC mains humming that ruins speech transcription.
+        """
+        if not shutil.which("amixer"):
+            return
+        try:
+            # Set Rear Mic Boost to 1 (10dB) and Capture to 80% if available
+            subprocess.run(["amixer", "sset", "Rear Mic Boost", "1"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(["amixer", "sset", "Capture", "80%"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(["amixer", "-c", "1", "sset", "Rear Mic Boost", "1"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(["amixer", "-c", "1", "sset", "Capture", "80%"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
 
     def _prewarm_connection(self):
         """Pre-warm DNS and TLS handshake to Google API server on startup."""
@@ -944,19 +966,29 @@ class VoiceFlowDaemon:
         return self._transcribe_fallback_flash_lite(audio_b64, mime_type, api_key, api_timeout)
 
     def _transcribe_fallback_flash_lite(self, audio_b64, mime_type, api_key, api_timeout):
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.cleanup_model}:generateContent?key={api_key}"
-        payload = {
-            "system_instruction": {"parts": [{"text": ASR_TRANSCRIPTION_PROMPT}]},
-            "contents": [{"parts": [{"inline_data": {"mime_type": mime_type, "data": audio_b64}}]}],
-            "generationConfig": {"temperature": 0.0, "maxOutputTokens": 4096}
-        }
-        try:
-            resp = self.session.post(url, json=payload, timeout=api_timeout)
-            if resp.status_code == 200:
-                parts = resp.json().get("candidates", [{}])[0].get("content", {}).get("parts", [])
-                return parts[0].get("text", "").strip() if parts else ""
-        except Exception as e:
-            Logger.error(f"Fallback ASR error: {e}")
+        models = [self.cleanup_model]
+        for fb in self.fallback_cleanup_models:
+            if fb not in models:
+                models.append(fb)
+
+        for model_name in models:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
+            payload = {
+                "system_instruction": {"parts": [{"text": ASR_TRANSCRIPTION_PROMPT}]},
+                "contents": [{"parts": [{"inline_data": {"mime_type": mime_type, "data": audio_b64}}]}],
+                "generationConfig": {"temperature": 0.0, "maxOutputTokens": 4096}
+            }
+            try:
+                resp = self.session.post(url, json=payload, timeout=api_timeout)
+                if resp.status_code == 200:
+                    parts = resp.json().get("candidates", [{}])[0].get("content", {}).get("parts", [])
+                    text = parts[0].get("text", "").strip() if parts else ""
+                    if text:
+                        return text
+                else:
+                    Logger.warn(f"Fallback ASR ({model_name}) HTTP {resp.status_code}. Trying next model...")
+            except Exception as e:
+                Logger.warn(f"Fallback ASR ({model_name}) error: {e}")
         return ""
 
     def _clean_text_stage2(self, raw_transcript, api_key):

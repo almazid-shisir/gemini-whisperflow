@@ -119,10 +119,10 @@ Configuration is stored at `~/.config/gemini-voice-flow/config.json`:
 {
   "gemini_api_key": "YOUR_GEMINI_API_KEY",
   "transcribe_model": "gemini-3.5-transcribe",
-  "cleanup_model": "gemini-2.5-flash",
+  "cleanup_model": "gemini-2.5-flash-lite",
   "fallback_cleanup_models": [
-    "gemini-3.1-flash-lite",
-    "gemini-3-flash-preview"
+    "gemini-3-flash-preview",
+    "gemini-3.1-flash-lite"
   ],
   "cleanup_timeout_sec": 5.0,
   "trigger_key": "smart",
@@ -140,7 +140,7 @@ Configuration is stored at `~/.config/gemini-voice-flow/config.json`:
 |---|---|---|---|
 | `gemini_api_key` | string | `""` | Google Gemini API key from AI Studio. |
 | `transcribe_model` | string | `"gemini-3.5-transcribe"` | Stage 1 1000% verbatim speech-to-text model. |
-| `cleanup_model` | string | `"gemini-2.5-flash"` | Primary Stage 2 thought clarifier & filler stripper. |
+| `cleanup_model` | string | `"gemini-2.5-flash-lite"` | Primary Stage 2 thought clarifier & filler stripper. |
 | `fallback_cleanup_models` | list | `["gemini-3.1-flash-lite", ...]` | Cascade backup models if primary times out. |
 | `cleanup_timeout_sec` | float | `5.0` | Latency ceiling for Stage 2 SSE streaming before instant verbatim paste. |
 | `trigger_key` | string | `"smart"` | Dictation trigger (`smart` accepts Right Alt & Right Shift; or `alt_r`, `shift_r`, `ctrl_r`, `f9`). |
