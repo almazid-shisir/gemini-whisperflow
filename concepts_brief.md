@@ -50,3 +50,16 @@ flowchart LR
    - End-to-end latency drops from **27.76s** down to **1.2s – 2.5s**.
    - API quota consumption halved (1 request per dictation instead of 2–4).
    - Zero conversational drift or invented responses.
+
+---
+
+## 3. Incident: Notification Storm & Resolution
+
+### Root Cause
+During the initial configuration update, an escaping issue in the shell command caused `config.json` to be written without property quotes, failing JSON parsing. Because the systemd service had `Restart=always` with a 2-second retry window, every crash spawned a `notify-send -u critical` desktop notification. In XFCE (`xfce4-notifyd`), critical notifications never auto-expire and stacked indefinitely on screen.
+
+### Mitigations Deployed
+1. **Dismissed Stuck Notifications:** Stopped `xfce4-notifyd` on the `who` machine, clearing all queued popups.
+2. **Notification Rate-Limiting & Expiring Priority:** Changed `-u critical` to `-u normal` with a 5-second auto-expiration timeout (`-t 5000`) and a 5-minute file-lock cooldown in `gemini_flow.py`.
+3. **Systemd Restart Protection:** Added `Restart=on-failure`, `RestartSec=5`, `StartLimitIntervalSec=60`, and `StartLimitBurst=5` to `gemini-whisperflow.service`.
+4. **Clean Status:** Daemon restarted and verified running stably under PID 47324.
