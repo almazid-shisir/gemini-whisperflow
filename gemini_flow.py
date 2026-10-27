@@ -1129,13 +1129,29 @@ def main():
                 "FATAL: No Gemini API Key configured in config.json!",
                 "Please open a terminal and run 'gemini-flow setup' to configure your API key."
             )
-            # Notify on desktop
-            if shutil.which("notify-send"):
-                subprocess.run([
-                    "notify-send", "-u", "critical", "-a", "WhisperFlow",
-                    "Gemini WhisperFlow Error",
-                    "No API Key configured! Run 'gemini-flow setup' in terminal."
-                ], check=False)
+            # Rate-limited desktop notification (max once every 5 minutes, auto-expiring in 5s)
+            lock_file = os.path.join(tempfile.gettempdir(), "gwf_api_err.lock")
+            now = time.time()
+            should_notify = True
+            if os.path.exists(lock_file):
+                try:
+                    with open(lock_file, "r") as f:
+                        last = float(f.read().strip())
+                        if now - last < 300:
+                            should_notify = False
+                except Exception:
+                    pass
+            if should_notify and shutil.which("notify-send"):
+                try:
+                    with open(lock_file, "w") as f:
+                        f.write(str(now))
+                    subprocess.run([
+                        "notify-send", "-t", "5000", "-u", "normal", "-a", "WhisperFlow",
+                        "Gemini WhisperFlow Error",
+                        "No API Key configured! Run 'gemini-flow setup' in terminal."
+                    ], check=False, timeout=2.0)
+                except Exception:
+                    pass
             sys.exit(1)
 
     Logger.banner(config)
