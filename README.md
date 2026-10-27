@@ -119,14 +119,12 @@ Configuration is stored at `~/.config/gemini-voice-flow/config.json`:
 {
   "gemini_api_key": "YOUR_GEMINI_API_KEY",
   "transcribe_model": "gemini-3.5-transcribe",
-  "cleanup_model": "gemini-2.5-flash-lite",
-  "fallback_cleanup_models": [
-    "gemini-3-flash-preview",
-    "gemini-3.1-flash-lite"
+  "fallback_models": [
+    "gemini-2.5-flash",
+    "gemini-3.5-flash-lite"
   ],
-  "cleanup_timeout_sec": 5.0,
+  "primary_timeout_sec": 7.0,
   "trigger_key": "smart",
-  "clean_transcript": true,
   "sound_feedback": false,
   "notify": true,
   "min_hold_seconds": 0.35,
@@ -139,14 +137,12 @@ Configuration is stored at `~/.config/gemini-voice-flow/config.json`:
 | Setting | Type | Default | Description |
 |---|---|---|---|
 | `gemini_api_key` | string | `""` | Google Gemini API key from AI Studio. |
-| `transcribe_model` | string | `"gemini-3.5-transcribe"` | Stage 1 1000% verbatim speech-to-text model. |
-| `cleanup_model` | string | `"gemini-2.5-flash-lite"` | Primary Stage 2 thought clarifier & filler stripper. |
-| `fallback_cleanup_models` | list | `["gemini-3.1-flash-lite", ...]` | Cascade backup models if primary times out. |
-| `cleanup_timeout_sec` | float | `5.0` | Latency ceiling for Stage 2 SSE streaming before instant verbatim paste. |
+| `transcribe_model` | string | `"gemini-3.5-transcribe"` | Primary direct speech-to-text model. |
+| `fallback_models` | list | `["gemini-2.5-flash", "gemini-3.5-flash-lite"]` | Instant failover models on 503 high demand or network timeout. |
+| `primary_timeout_sec` | float | `7.0` | Timeout for primary transcribe before instant fallback. |
 | `trigger_key` | string | `"smart"` | Dictation trigger (`smart` accepts Right Alt & Right Shift; or `alt_r`, `shift_r`, `ctrl_r`, `f9`). |
-| `clean_transcript` | boolean | `true` | When `true`, applies code-switching punctuation & tech normalization. |
 | `min_hold_seconds` | float | `0.35` | Taps shorter than this toggle hands-free mode; holds longer behave as push-to-talk. |
-| `silence_threshold_db` | float | `-45.0` | Peak volume dB gate. Rejects room silence locally to save API quota. |
+| `silence_threshold_db` | float | `-48.0` | Peak volume dB gate. Rejects room silence locally to save API quota. |
 | `sound_feedback` | boolean | `false` | Play audio cues on record start and completion. |
 | `notify` | boolean | `true` | Display instant desktop notifications via `notify-send`. |
 

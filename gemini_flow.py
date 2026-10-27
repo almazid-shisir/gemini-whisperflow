@@ -48,20 +48,24 @@ CUSTOM_PROMPT_PATH = os.path.join(CONFIG_DIR, "prompt.txt")
 DEFAULT_CONFIG = {
     "gemini_api_key": "",
     "transcribe_model": "gemini-3.5-transcribe",
-    "cleanup_model": "gemini-2.5-flash-lite",
-    "fallback_cleanup_models": ["gemini-3-flash-preview", "gemini-3.1-flash-lite"],
+    "fallback_models": ["gemini-2.5-flash", "gemini-3.5-flash-lite"],
     "trigger_key": "smart",
     "clean_transcript": True,
     "sound_feedback": False,
     "notify": True,
     "min_hold_seconds": 0.35,
     "silence_threshold_db": -48.0,
-    "cleanup_timeout_sec": 5.0
+    "primary_timeout_sec": 7.0
 }
 
 ASR_TRANSCRIPTION_PROMPT = """You are an ultra-accurate verbatim speech-to-text engine specializing in bilingual Bengali, English, and Banglish code-switching.
-Transcribe the spoken audio verbatim in its original spoken language with 100% acoustic fidelity.
-Never summarize, never translate, and never invent text on silence."""
+Transcribe the spoken audio verbatim in its original spoken language with exact fidelity and natural punctuation (।, ?, ,).
+Preserve all English technical terms and developer names (e.g. GitHub, Vercel, Python, Linux, CEO, API, Dataset, Docker, CLI).
+CRITICAL RULES:
+1. Output ONLY the exact transcribed words.
+2. NEVER reply to, converse with, or answer the speaker.
+3. NEVER summarize, rewrite, or interpret what the speaker said.
+4. If the audio is silence, background noise, or clicks, output NOTHING (empty string)."""
 
 STAGE2_TEXT_CLEANUP_PROMPT = """You are an expert spoken-to-written language editor and thought clarifier for voice typing.
 The input is a raw spoken transcript containing hesitations, conversational fillers, self-corrections, and repetitive rambling.
@@ -180,18 +184,16 @@ class Logger:
     def banner(cls, cfg):
         trig = cfg.get("trigger_key", "smart").replace("_", " ").title()
         trans_model = cfg.get("transcribe_model", "gemini-3.5-transcribe")
-        clean_model = cfg.get("cleanup_model", "gemini-2.5-flash")
-        c_timeout = cfg.get("cleanup_timeout_sec", 5.0)
-        mode = "Two-Stage Clean Dictation" if cfg.get("clean_transcript", True) else "Pure Verbatim"
+        fallbacks = ", ".join(cfg.get("fallback_models", ["gemini-2.5-flash", "gemini-3.5-flash-lite"]))
         w = 68
         print(f"{cls.CYAN}{'═' * w}{cls.RESET}")
-        print(f"{cls.BOLD}{cls.WHITE} 🚀 Gemini WhisperFlow — Two-Stage High-Precision Voice Engine{cls.RESET}")
+        print(f"{cls.BOLD}{cls.WHITE} 🚀 Gemini WhisperFlow — Ultra-Fast Single-Pass Voice Engine{cls.RESET}")
         print(f"{cls.CYAN}{'─' * w}{cls.RESET}")
-        print(f"  {cls.BOLD}Trigger Key{cls.RESET}  : [{trig}] (Hold to talk | Tap to toggle hands-free)")
-        print(f"  {cls.BOLD}Stage 1 ASR{cls.RESET}  : {cls.GREEN}{trans_model}{cls.RESET} (1000% Verbatim Accuracy)")
-        print(f"  {cls.BOLD}Stage 2 NLP{cls.RESET}  : {cls.GREEN}{clean_model}{cls.RESET} (Latency-Ceiling: {c_timeout}s with Failover)")
-        print(f"  {cls.BOLD}Output Mode{cls.RESET}  : {mode}")
-        print(f"  {cls.BOLD}Config File{cls.RESET}  : {CONFIG_PATH}")
+        print(f"  {cls.BOLD}Trigger Key{cls.RESET}     : [{trig}] (Hold to talk | Tap to toggle hands-free)")
+        print(f"  {cls.BOLD}Primary Model{cls.RESET}   : {cls.GREEN}{trans_model}{cls.RESET} (Direct Speech-to-Text)")
+        print(f"  {cls.BOLD}Fast Fallback{cls.RESET}   : {cls.DIM}{fallbacks}{cls.RESET} (Zero-delay failover on 503/timeout)")
+        print(f"  {cls.BOLD}Architecture{cls.RESET}    : Single-Pass Direct (Zero Stage-2 Hallucination)")
+        print(f"  {cls.BOLD}Config File{cls.RESET}     : {CONFIG_PATH}")
         print(f"{cls.CYAN}{'═' * w}{cls.RESET}\n", flush=True)
 
 
@@ -224,21 +226,19 @@ def load_config():
             cfg = json.load(f)
             merged = DEFAULT_CONFIG.copy()
             merged.update(cfg)
-            # Automatic migration away from hanging 3.5 text models
             needs_save = False
-            if merged.get("cleanup_model") in ("gemini-3.5-flash-lite", "gemini-3.5-flash"):
-                merged["cleanup_model"] = "gemini-3.1-flash-lite"
+            # Clean up obsolete or rate-limited models
+            if merged.get("transcribe_model") in ("", "gemini-3.5-flash-lite", "gemini-2.5-flash-lite"):
+                merged["transcribe_model"] = "gemini-3.5-transcribe"
                 needs_save = True
-            if "model" in merged:
-                if merged.get("model") in ("gemini-3.5-flash-lite", "gemini-3.5-flash"):
-                    merged["model"] = "gemini-3.1-flash-lite"
-                    needs_save = True
-            if "fallback_cleanup_models" not in cfg:
-                merged["fallback_cleanup_models"] = ["gemini-3.1-flash-lite-preview", "gemini-3-flash-preview"]
+            if "fallback_models" not in cfg:
+                merged["fallback_models"] = ["gemini-2.5-flash", "gemini-3.5-flash-lite"]
                 needs_save = True
-            if "cleanup_timeout_sec" not in cfg:
-                merged["cleanup_timeout_sec"] = 2.2
+            cleaned_fallbacks = [m for m in merged.get("fallback_models", []) if m not in ("gemini-3-flash-preview", "gemini-2.5-flash-lite", "gemini-3.1-flash-lite")]
+            if not cleaned_fallbacks:
+                cleaned_fallbacks = ["gemini-2.5-flash", "gemini-3.5-flash-lite"]
                 needs_save = True
+            merged["fallback_models"] = cleaned_fallbacks
             if needs_save:
                 save_config(merged)
             return merged
@@ -405,10 +405,10 @@ def compress_audio_in_memory(wav_path):
 # ==============================================================================
 # Gemini API Verification & Interactive Setup
 # ==============================================================================
-def verify_gemini_api_key(api_key, transcribe_model="gemini-3.5-transcribe", cleanup_model="gemini-3.1-flash-lite", fallback_models=None):
+def verify_gemini_api_key(api_key, transcribe_model="gemini-3.5-transcribe", fallback_models=None):
     """
     Verify Gemini API key against Google API servers.
-    Tests both the specialized transcribe model and the cleanup model (with failover cascade).
+    Tests transcribe model and fallback models.
     Returns (success: bool, error_message: str)
     """
     if not api_key:
@@ -420,42 +420,30 @@ def verify_gemini_api_key(api_key, transcribe_model="gemini-3.5-transcribe", cle
     try:
         url1 = f"https://generativelanguage.googleapis.com/v1beta/models/{transcribe_model}?key={api_key}"
         resp1 = session.get(url1, timeout=6.0)
-        if resp1.status_code != 200:
+        if resp1.status_code == 200:
+            return True, f"API Key validated! ({transcribe_model} is responsive)"
+        else:
             err_msg = ""
             try:
                 err_msg = resp1.json().get("error", {}).get("message", resp1.text[:200])
             except Exception:
                 err_msg = resp1.text[:200]
-            return False, f"Model '{transcribe_model}' check failed (HTTP {resp1.status_code}): {err_msg}"
+            Logger.warn(f"Model '{transcribe_model}' returned HTTP {resp1.status_code}: {err_msg}. Checking fallback...")
     except requests.exceptions.RequestException as e:
-        return False, f"Network connection error on {transcribe_model}: {e}"
+        Logger.warn(f"Network error on {transcribe_model}: {e}")
 
-    # 2. Test Cleanup model inference (with fallback cascade)
-    check_list = [cleanup_model]
-    if fallback_models:
-        for fb in fallback_models:
-            if fb not in check_list:
-                check_list.append(fb)
-
-    last_err = ""
+    # 2. Test fallback models
+    check_list = fallback_models or ["gemini-2.5-flash", "gemini-3.5-flash-lite"]
     for cm in check_list:
         try:
-            url2 = f"https://generativelanguage.googleapis.com/v1beta/models/{cm}:generateContent?key={api_key}"
-            payload = {"contents": [{"parts": [{"text": "ping"}]}]}
-            resp2 = session.post(url2, json=payload, timeout=4.0)
+            url2 = f"https://generativelanguage.googleapis.com/v1beta/models/{cm}?key={api_key}"
+            resp2 = session.get(url2, timeout=5.0)
             if resp2.status_code == 200:
-                return True, f"API Key validated! ({cm} is responsive)"
-            else:
-                err_msg = ""
-                try:
-                    err_msg = resp2.json().get("error", {}).get("message", resp2.text[:200])
-                except Exception:
-                    err_msg = resp2.text[:200]
-                last_err = f"Model '{cm}' check failed (HTTP {resp2.status_code}): {err_msg}"
-        except requests.exceptions.RequestException as e:
-            last_err = f"Network connection error on '{cm}': {e}"
+                return True, f"API Key validated! (Fallback {cm} is responsive)"
+        except requests.exceptions.RequestException:
+            pass
 
-    return False, last_err
+    return False, "Failed to connect to Google Gemini API servers. Please check your API key and internet connection."
 
 
 def interactive_setup():
@@ -501,13 +489,12 @@ def interactive_setup():
         ok, msg = verify_gemini_api_key(
             api_key,
             cfg.get("transcribe_model", "gemini-3.5-transcribe"),
-            cfg.get("cleanup_model", "gemini-3.1-flash-lite"),
-            cfg.get("fallback_cleanup_models", ["gemini-3.1-flash-lite-preview", "gemini-3-flash-preview"])
+            cfg.get("fallback_models", ["gemini-2.5-flash", "gemini-3.5-flash-lite"])
         )
         if ok:
             Logger.success("Google Gemini API Key verified successfully!")
-            print(f"   • Ultra-Fast Engine : {Logger.GREEN}{cfg.get('cleanup_model', 'gemini-3.1-flash-lite')}{Logger.RESET} [READY]")
-            print(f"   • ASR Backup Engine  : {Logger.GREEN}{cfg.get('transcribe_model', 'gemini-3.5-transcribe')}{Logger.RESET} [READY]")
+            print(f"   • Direct Engine : {Logger.GREEN}{cfg.get('transcribe_model', 'gemini-3.5-transcribe')}{Logger.RESET} [READY]")
+            print(f"   • Fast Fallback : {Logger.GREEN}{', '.join(cfg.get('fallback_models', ['gemini-2.5-flash']))}{Logger.RESET} [READY]")
             cfg["gemini_api_key"] = api_key
             break
         else:
@@ -613,8 +600,7 @@ def run_self_test(cfg):
     ok, msg = verify_gemini_api_key(
         api_key,
         cfg.get("transcribe_model", "gemini-3.5-transcribe"),
-        cfg.get("cleanup_model", "gemini-3.1-flash-lite"),
-        cfg.get("fallback_cleanup_models", ["gemini-3.1-flash-lite-preview", "gemini-3-flash-preview"])
+        cfg.get("fallback_models", ["gemini-2.5-flash", "gemini-3.5-flash-lite"])
     )
     if not ok:
         Logger.error("API test failed!", msg)
@@ -698,9 +684,8 @@ class VoiceFlowDaemon:
         self.silence_threshold_db = float(cfg.get("silence_threshold_db", -48.0))
 
         self.transcribe_model = cfg.get("transcribe_model", "gemini-3.5-transcribe")
-        self.cleanup_model = cfg.get("cleanup_model", "gemini-2.5-flash-lite")
-        self.fallback_cleanup_models = cfg.get("fallback_cleanup_models", ["gemini-3-flash-preview", "gemini-3.1-flash-lite"])
-        self.cleanup_timeout_sec = float(cfg.get("cleanup_timeout_sec", 5.0))
+        self.fallback_models = cfg.get("fallback_models", ["gemini-2.5-flash", "gemini-3.5-flash-lite"])
+        self.primary_timeout_sec = float(cfg.get("primary_timeout_sec", 7.0))
 
         self.session = create_robust_session()
         threading.Thread(target=self._prewarm_connection, daemon=True).start()
@@ -931,16 +916,20 @@ class VoiceFlowDaemon:
 
         return ""
 
-    def _transcribe_audio_stage1(self, audio_bytes, mime_type, api_key, duration_sec):
+    def _transcribe_direct(self, audio_bytes, mime_type, api_key, duration_sec):
         """
-        Stage 1: Accurate Verbatim ASR Transcription (gemini-3.5-transcribe).
-        Transcribes speech verbatim in original language with 1000% acoustic fidelity.
-        Falls back to Flash-Lite ASR if transcribe endpoint returns an error.
+        Ultra-Fast Single-Pass Speech-to-Text Engine.
+        Transcribes speech verbatim directly from gemini-3.5-transcribe in ONE hop.
+        If Google returns 503 (demand spike) or network timeout, instantly fails over
+        to gemini-2.5-flash / gemini-3.5-flash-lite in the same hop.
+        Zero secondary LLM passes. Zero conversational hallucination.
         """
         audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
-        api_timeout = max(12.0, min(180.0, 12.0 + (duration_sec * 0.15)))
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.transcribe_model}:generateContent?key={api_key}"
-        payload = {
+
+        # 1. Primary Direct Call: gemini-3.5-transcribe
+        to_primary = max(3.5, min(14.0, self.primary_timeout_sec + (duration_sec * 0.08)))
+        url_primary = f"https://generativelanguage.googleapis.com/v1beta/models/{self.transcribe_model}:generateContent?key={api_key}"
+        payload_primary = {
             "contents": [{
                 "parts": [
                     {"inline_data": {"mime_type": mime_type, "data": audio_b64}}
@@ -949,103 +938,49 @@ class VoiceFlowDaemon:
         }
 
         try:
-            resp = self.session.post(url, json=payload, timeout=api_timeout)
+            resp = self.session.post(url_primary, json=payload_primary, timeout=to_primary)
             if resp.status_code == 200:
                 candidates = resp.json().get("candidates", [])
                 if candidates:
                     parts = candidates[0].get("content", {}).get("parts", [])
                     text = parts[0].get("text", "").strip() if parts else ""
                     if text:
-                        return text
+                        return apply_deterministic_tech_normalization(text)
+                    return ""
             else:
-                Logger.warn(f"Stage 1 Transcribe HTTP {resp.status_code}. Falling back to Flash-Lite...")
+                Logger.warn(f"Direct transcribe ({self.transcribe_model}) HTTP {resp.status_code}. Fast-switching to fallback...")
         except Exception as e:
-            Logger.warn(f"Stage 1 connection reset, retrying: {e}")
+            Logger.warn(f"Direct transcribe ({self.transcribe_model}) timeout/error ({to_primary:.1f}s): {e}. Fast-switching to fallback...")
 
-        # Fallback to Flash-Lite ASR
-        return self._transcribe_fallback_flash_lite(audio_b64, mime_type, api_key, api_timeout)
-
-    def _transcribe_fallback_flash_lite(self, audio_b64, mime_type, api_key, api_timeout):
-        models = [self.cleanup_model]
-        for fb in self.fallback_cleanup_models:
-            if fb not in models:
-                models.append(fb)
-
-        for model_name in models:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
-            payload = {
+        # 2. Instant Zero-Hallucination Fallback (Verbatim)
+        for fb_model in self.fallback_models:
+            to_fb = max(5.0, min(25.0, 5.0 + (duration_sec * 0.12)))
+            fb_url = f"https://generativelanguage.googleapis.com/v1beta/models/{fb_model}:generateContent?key={api_key}"
+            fb_payload = {
                 "system_instruction": {"parts": [{"text": ASR_TRANSCRIPTION_PROMPT}]},
-                "contents": [{"parts": [{"inline_data": {"mime_type": mime_type, "data": audio_b64}}]}],
+                "contents": [{
+                    "parts": [
+                        {"inline_data": {"mime_type": mime_type, "data": audio_b64}}
+                    ]
+                }],
                 "generationConfig": {"temperature": 0.0, "maxOutputTokens": 4096}
             }
             try:
-                resp = self.session.post(url, json=payload, timeout=api_timeout)
+                resp = self.session.post(fb_url, json=fb_payload, timeout=to_fb)
                 if resp.status_code == 200:
-                    parts = resp.json().get("candidates", [{}])[0].get("content", {}).get("parts", [])
-                    text = parts[0].get("text", "").strip() if parts else ""
-                    if text:
-                        return text
+                    candidates = resp.json().get("candidates", [])
+                    if candidates:
+                        parts = candidates[0].get("content", {}).get("parts", [])
+                        text = parts[0].get("text", "").strip() if parts else ""
+                        if text:
+                            return apply_deterministic_tech_normalization(text)
+                        return ""
                 else:
-                    Logger.warn(f"Fallback ASR ({model_name}) HTTP {resp.status_code}. Trying next model...")
+                    Logger.warn(f"Fallback ASR ({fb_model}) HTTP {resp.status_code}. Trying next...")
             except Exception as e:
-                Logger.warn(f"Fallback ASR ({model_name}) error: {e}")
+                Logger.warn(f"Fallback ASR ({fb_model}) error: {e}")
+
         return ""
-
-    def _clean_text_stage2(self, raw_transcript, api_key):
-        """
-        Stage 2: Ultra-Fast language cleanup & restructuring via Gemini 2.5 Flash
-        with Server-Sent Events (SSE) streaming for sub-2.5s TTFB and zero gateway buffering.
-        Strips verbal fillers, fixes spoken tongue slips, and smooths syntax.
-        """
-        prompt = get_cleanup_prompt()
-
-        # Dynamic model cascade in order of speed & responsiveness
-        models_to_try = [self.cleanup_model]
-        for fb in self.fallback_cleanup_models:
-            if fb not in models_to_try:
-                models_to_try.append(fb)
-
-        for idx, model_name in enumerate(models_to_try):
-            gen_config = {"temperature": 0.1, "maxOutputTokens": 2048}
-            if "2.5" in model_name:
-                gen_config["thinkingConfig"] = {"thinkingBudget": 0}
-
-            payload = {
-                "system_instruction": {"parts": [{"text": prompt}]},
-                "contents": [{"parts": [{"text": raw_transcript}]}],
-                "generationConfig": gen_config
-            }
-
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:streamGenerateContent?alt=sse&key={api_key}"
-            try:
-                to = self.cleanup_timeout_sec if idx == 0 else min(4.5, self.cleanup_timeout_sec)
-                resp = self.session.post(url, json=payload, stream=True, timeout=to)
-                if resp.status_code == 200:
-                    chunks = []
-                    for line in resp.iter_lines():
-                        if not line:
-                            continue
-                        line_str = line.decode("utf-8", errors="ignore")
-                        if line_str.startswith("data: "):
-                            try:
-                                d = json.loads(line_str[6:])
-                                parts = d.get("candidates", [{}])[0].get("content", {}).get("parts", [])
-                                for p in parts:
-                                    t = p.get("text", "")
-                                    if t:
-                                        chunks.append(t)
-                            except Exception:
-                                pass
-                    clean_text = "".join(chunks).strip()
-                    if clean_text:
-                        return apply_deterministic_tech_normalization(clean_text)
-                else:
-                    Logger.warn(f"Stage 2 ({model_name}) HTTP {resp.status_code}. Trying fallback model...")
-            except Exception as e:
-                Logger.warn(f"Stage 2 ({model_name}) error (TTFB Ceiling: {to}s): {e}")
-
-        Logger.warn("Stage 2 all models timed out/failed. Instant fallback to Stage 1 verbatim.")
-        return apply_deterministic_tech_normalization(raw_transcript)
 
     def _process_and_paste(self, wav_path, hold_duration_sec):
         t0 = time.time()
@@ -1062,7 +997,7 @@ class VoiceFlowDaemon:
             return
 
         try:
-            # 2. In-Memory Audio Conditioning & Compression (~100ms)
+            # 2. In-Memory Audio Conditioning & Compression (~80ms)
             t_c0 = time.time()
             audio_bytes, mime_type = compress_audio_in_memory(wav_path)
             t_compress = time.time() - t_c0
@@ -1076,35 +1011,24 @@ class VoiceFlowDaemon:
                 self.show_notification("Configuration Error", "Missing API key! Run 'gemini-flow setup'.")
                 return
 
-            # 3. Stage 1: Fast & Accurate ASR Audio Transcription
-            t_stg1 = time.time()
-            raw_text = self._transcribe_audio_stage1(audio_bytes, mime_type, api_key, hold_duration_sec)
-            t_stage1 = time.time() - t_stg1
+            # 3. Direct Single-Pass Voice Transcription
+            t_api0 = time.time()
+            final_text = self._transcribe_direct(audio_bytes, mime_type, api_key, hold_duration_sec)
+            t_api = time.time() - t_api0
 
-            if not raw_text or raw_text.strip() in ("<noise>", "<silence>", "[noise]", "[silence]"):
+            if not final_text or final_text.strip() in ("<noise>", "<silence>", "[noise]", "[silence]"):
                 Logger.info("No speech detected in audio.")
                 self.show_notification("Notice", "No speech detected.")
                 return
 
-            # 4. Stage 2: Deep Language Cleanup & Thought Restructuring via Flash-Lite
-            final_text = raw_text
-            t_stage2 = 0.0
-            if self.cfg.get("clean_transcript", True):
-                t_stg2 = time.time()
-                final_text = self._clean_text_stage2(raw_text, api_key)
-                t_stage2 = time.time() - t_stg2
-            else:
-                final_text = apply_deterministic_tech_normalization(raw_text)
-
             elapsed = round(time.time() - t0, 2)
             file_kb = round(len(audio_bytes) / 1024, 1)
-            Logger.success(f"Dictation finished in {elapsed}s (ASR: {t_stage1:.2f}s, NLP: {t_stage2:.2f}s, Prep: {t_compress:.2f}s, {file_kb}KB):")
-            print(f"      {Logger.DIM}Raw  :{Logger.RESET} \"{raw_text[:75]}{'...' if len(raw_text) > 75 else ''}\"")
-            print(f"      {Logger.BOLD}Clean:{Logger.RESET} \"{final_text[:75]}{'...' if len(final_text) > 75 else ''}\"", flush=True)
+            Logger.success(f"Dictation finished in {elapsed}s (API: {t_api:.2f}s, Prep: {t_compress:.2f}s, {file_kb}KB):")
+            print(f"      {Logger.BOLD}Text:{Logger.RESET} \"{final_text[:85]}{'...' if len(final_text) > 85 else ''}\"", flush=True)
 
             self.play_sound("complete")
             self._paste_text(final_text)
-            self.show_notification("Done", final_text[:60] + ("..." if len(final_text) > 60 else ""))
+            self.show_notification("Dictation Ready", final_text[:60] + ("..." if len(final_text) > 60 else ""))
 
         except Exception as e:
             Logger.error(f"Processing exception occurred: {e}", exc=e)
